@@ -4,6 +4,9 @@ import com.uniaball.downloader.data.api.GitHubApi
 import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.model.WorkflowRunPage
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
@@ -66,9 +69,23 @@ object UniaballRepository {
     private const val KEY_OPENJDK_RUNS_PREFIX = "cache_openjdk_runs_"
     private const val KEY_OPENJDK_ALL_RUNS = "cache_openjdk_all_runs"
     private const val KEY_ARTIFACTS_PREFIX = "cache_artifacts_"
+    private const val KEY_MIRROR_ENABLED = "pref_mirror_enabled"
+
+    // gh-proxy 镜像下载开关（默认开启，与原网站一致）
+    private val _isMirrorEnabled = MutableStateFlow(true)
+    val isMirrorEnabled: StateFlow<Boolean> = _isMirrorEnabled.asStateFlow()
 
     fun init(context: android.content.Context) {
         appContext = context.applicationContext
+        // 从磁盘读取镜像开关初始值（默认 true）
+        val prefs = appContext?.getSharedPreferences(PREF_NAME, android.content.Context.MODE_PRIVATE)
+        _isMirrorEnabled.value = prefs?.getBoolean(KEY_MIRROR_ENABLED, true) ?: true
+    }
+
+    fun setMirrorEnabled(enabled: Boolean) {
+        _isMirrorEnabled.value = enabled
+        val prefs = prefs() ?: return
+        prefs.edit().putBoolean(KEY_MIRROR_ENABLED, enabled).apply()
     }
 
     private fun checkRateLimit() {
@@ -251,14 +268,17 @@ object UniaballRepository {
     }
 
     /**
-     * 将任意 GitHub URL 拼接为 gh-proxy.com 镜像 URL
+     * 将任意 GitHub URL 拼接为 gh-proxy.com 镜像 URL。
+     * 根据 [isMirrorEnabled] 开关决定是否加镜像前缀：
+     *   - 开关开启（默认）：返回 https://gh-proxy.com/{url}
+     *   - 开关关闭：返回原 URL（直连 GitHub）
      * 输入示例：
      *   https://api.github.com/repos/MobileGL-Dev/MobileGL/actions/artifacts/8453894305/zip
      *   https://github.com/MobileGL-Dev/MobileGL/releases/download/v1.0/xxx.zip
-     * 输出：https://gh-proxy.com/https://api.github.com/repos/...
      */
     fun mirror(url: String): String {
         if (url.isBlank()) return url
+        if (!_isMirrorEnabled.value) return url
         if (url.startsWith(GH_PROXY)) return url
         return GH_PROXY + url
     }

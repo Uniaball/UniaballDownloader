@@ -59,6 +59,7 @@ import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.util.DownloadUtil
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
+import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -218,7 +219,7 @@ private fun SuccessView(releases: List<GitHubRelease>, modifier: Modifier = Modi
     ) {
         item {
             Text(
-                text = "DesktopGlues Releases 下载（使用 gh-proxy.com 镜像）",
+                text = "DesktopGlues Releases 下载",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -265,11 +266,9 @@ private fun ReleaseCard(release: GitHubRelease, modifier: Modifier = Modifier) {
                 SuggestionChip(onClick = {}, label = { Text("Pre-release") })
             }
             release.body?.takeIf { it.isNotBlank() }?.let { body ->
-                Text(
-                    text = body,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
+                MarkdownText(
+                    markdown = body,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
