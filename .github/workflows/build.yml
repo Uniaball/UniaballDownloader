@@ -33,8 +33,8 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > app/app.jks
-          echo "KEYSTORE_PATH=app/app.jks" >> $GITHUB_ENV
+          echo "$KEYSTORE_BASE64" | base64 -d > app.jks
+          echo "KEYSTORE_PATH=app.jks" >> $GITHUB_ENV
 
       - name: Build Debug APK
         env:

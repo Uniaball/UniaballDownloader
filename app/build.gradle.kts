@@ -24,8 +24,14 @@ android {
 
     signingConfigs {
         create("release") {
-            // 从环境变量或 Gradle 属性读取签名信息（CI 注入）
-            storeFile = file(System.getenv("KEYSTORE_PATH") ?: "app.jks")
+            // 从环境变量读取签名信息（CI 注入）
+            // KEYSTORE_PATH 应为 keystore 文件的绝对路径或相对于项目根的路径
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            storeFile = if (keystorePath.isNullOrEmpty()) {
+                file("app.jks")
+            } else {
+                file(rootDir).resolve(keystorePath)
+            }
             storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
             keyAlias = System.getenv("KEY_ALIAS") ?: ""
             keyPassword = System.getenv("KEY_PASSWORD") ?: ""
