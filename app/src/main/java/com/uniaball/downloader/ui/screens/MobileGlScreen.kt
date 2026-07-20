@@ -43,7 +43,8 @@ import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.util.DownloadUtil
-import com.uniaball.downloader.util.FormatUtil
+import com.uniaball.downloader.util.formatSize
+import com.uniaball.downloader.util.formatTime
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -238,7 +239,7 @@ private fun MobileGlBuildCard(item: MobileGlBuildItem) {
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "#${run.runNumber} • ${FormatUtil.formatTime(artifact.createdAt)} • ${run.conclusion ?: run.status}",
+                text = "#${run.runNumber} • ${formatTime(artifact.createdAt)} • ${run.conclusion ?: run.status}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -250,7 +251,7 @@ private fun MobileGlBuildCard(item: MobileGlBuildItem) {
             ) {
                 StatusChip(conclusion = run.conclusion)
                 Text(
-                    text = FormatUtil.formatSize(artifact.sizeInBytes),
+                    text = formatSize(artifact.sizeInBytes),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

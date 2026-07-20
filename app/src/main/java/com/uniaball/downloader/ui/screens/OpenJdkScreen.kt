@@ -18,7 +18,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilledButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -41,7 +41,8 @@ import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.util.DownloadUtil
-import com.uniaball.downloader.util.FormatUtil
+import com.uniaball.downloader.util.formatSize
+import com.uniaball.downloader.util.formatTime
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -164,7 +165,7 @@ fun OpenJdkScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        FilledButton(
+        Button(
             onClick = { viewModel.fetchBuilds() },
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -282,7 +283,7 @@ private fun BuildCard(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "run #${run.runNumber} • ${FormatUtil.formatTime(artifact.createdAt)}",
+                text = "run #${run.runNumber} • ${formatTime(artifact.createdAt)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -293,7 +294,7 @@ private fun BuildCard(
             ) {
                 ConclusionChip(conclusion = run.conclusion)
                 Text(
-                    text = FormatUtil.formatSize(artifact.sizeInBytes),
+                    text = formatSize(artifact.sizeInBytes),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -22,7 +22,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -102,7 +102,7 @@ private fun ErrorView(message: String, onRetry: () -> Unit, modifier: Modifier =
         ) {
             Text("加载失败", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FilledButton(onClick = onRetry) { Text("重试") }
+            Button(onClick = onRetry) { Text("重试") }
         }
     }
 }
