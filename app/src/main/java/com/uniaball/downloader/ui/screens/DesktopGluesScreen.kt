@@ -1,5 +1,12 @@
 package com.uniaball.downloader.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -143,14 +150,29 @@ fun DesktopGluesScreen(modifier: Modifier = Modifier) {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        when (val s = state) {
-            DesktopGluesUiState.Loading -> Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center
-            ) { CircularProgressIndicator() }
-            is DesktopGluesUiState.Error -> ErrorView(s.message, { viewModel.load() }, Modifier.fillMaxSize().padding(padding))
-            DesktopGluesUiState.Empty -> EmptyView(Modifier.fillMaxSize().padding(padding))
-            is DesktopGluesUiState.Success -> SuccessView(s.releases, Modifier.fillMaxSize().padding(padding))
+        AnimatedContent(
+            targetState = state,
+            modifier = Modifier.fillMaxSize().padding(padding),
+            transitionSpec = {
+                fadeIn(animationSpec = tween(220)) + slideInVertically(
+                    animationSpec = tween(220),
+                    initialOffsetY = { it / 8 }
+                ) togetherWith fadeOut(animationSpec = tween(180)) + slideOutVertically(
+                    animationSpec = tween(180),
+                    targetOffsetY = { -it / 8 }
+                )
+            },
+            label = "desktopglues-state"
+        ) { target ->
+            when (target) {
+                DesktopGluesUiState.Loading -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
+                is DesktopGluesUiState.Error -> ErrorView(target.message, { viewModel.load() }, Modifier.fillMaxSize())
+                DesktopGluesUiState.Empty -> EmptyView(Modifier.fillMaxSize())
+                is DesktopGluesUiState.Success -> SuccessView(target.releases, Modifier.fillMaxSize())
+            }
         }
     }
 }
@@ -201,15 +223,15 @@ private fun SuccessView(releases: List<GitHubRelease>, modifier: Modifier = Modi
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        items(items = releases, key = { it.id }) { ReleaseCard(release = it) }
+        items(items = releases, key = { it.id }) { ReleaseCard(release = it, modifier = Modifier.animateItem()) }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReleaseCard(release: GitHubRelease) {
+private fun ReleaseCard(release: GitHubRelease, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)

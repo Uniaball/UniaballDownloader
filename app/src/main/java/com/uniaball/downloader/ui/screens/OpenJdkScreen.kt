@@ -1,5 +1,12 @@
 package com.uniaball.downloader.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -313,18 +320,32 @@ fun OpenJdkScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            when (val s = uiState) {
-                OpenJdkUiState.Idle -> IdleContent()
-                OpenJdkUiState.Loading -> LoadingContent()
-                is OpenJdkUiState.Success -> BuildsList(
-                    items = s.items,
-                    onDownload = { url -> DownloadUtil.openDownload(context, url) }
-                )
-                is OpenJdkUiState.Error -> ErrorContent(
-                    message = s.message,
-                    onRetry = { viewModel.fetchBuilds() }
-                )
-                OpenJdkUiState.Empty -> EmptyContent()
+            AnimatedContent(
+                targetState = uiState,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(220)) + slideInVertically(
+                        animationSpec = tween(220),
+                        initialOffsetY = { it / 8 }
+                    ) togetherWith fadeOut(animationSpec = tween(180)) + slideOutVertically(
+                        animationSpec = tween(180),
+                        targetOffsetY = { -it / 8 }
+                    )
+                },
+                label = "openjdk-state"
+            ) { state ->
+                when (state) {
+                    OpenJdkUiState.Idle -> IdleContent()
+                    OpenJdkUiState.Loading -> LoadingContent()
+                    is OpenJdkUiState.Success -> BuildsList(
+                        items = state.items,
+                        onDownload = { url -> DownloadUtil.openDownload(context, url) }
+                    )
+                    is OpenJdkUiState.Error -> ErrorContent(
+                        message = state.message,
+                        onRetry = { viewModel.fetchBuilds() }
+                    )
+                    OpenJdkUiState.Empty -> EmptyContent()
+                }
             }
         }
     }
@@ -397,8 +418,8 @@ private fun BuildsList(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(items) { item ->
-            BuildCard(item = item, onDownload = onDownload)
+        items(items, key = { it.artifact.id }) { item ->
+            BuildCard(item = item, onDownload = onDownload, modifier = Modifier.animateItem())
         }
     }
 }
@@ -407,7 +428,8 @@ private fun BuildsList(
 @Composable
 private fun BuildCard(
     item: OpenJdkBuildItem,
-    onDownload: (String) -> Unit
+    onDownload: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val artifact = item.artifact
     val run = item.run
@@ -421,7 +443,7 @@ private fun BuildCard(
     }
     Card(
         onClick = { onDownload(downloadUrl) },
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier.padding(16.dp),

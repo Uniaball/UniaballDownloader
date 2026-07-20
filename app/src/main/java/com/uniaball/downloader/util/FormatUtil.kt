@@ -14,12 +14,14 @@ fun formatSize(bytes: Long): String {
 
 /**
  * 将 ISO8601 时间字符串（如 2026-07-20T15:34:00Z）格式化为 yyyy-MM-dd HH:mm
+ * GitHub API 返回的是 UTC 时间，这里转换为系统本地时区（北京时间 UTC+8）后再格式化
  */
 fun formatTime(iso: String): String {
     if (iso.isBlank()) return ""
     return runCatching {
         val input = java.time.OffsetDateTime.parse(iso)
+        val local = input.atZoneSameInstant(java.time.ZoneId.systemDefault())
         val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-        input.format(formatter)
+        local.format(formatter)
     }.getOrElse { iso }
 }

@@ -1,5 +1,12 @@
 package com.uniaball.downloader.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -218,8 +225,8 @@ fun MobileGlScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 val countText = when (state) {
-                    is MobileGlUiState.Success -> "找到 ${(state as MobileGlUiState.Success).items.size} 个 APK 构建文件（来自工作流 'MobileGL APK'）"
-                    is MobileGlUiState.Empty -> "找到 0 个 APK 构建文件（来自工作流 'MobileGL APK'）"
+                    is MobileGlUiState.Success -> "找到 ${(state as MobileGlUiState.Success).items.size} 个构建产物（来自工作流 'MobileGL APK'）"
+                    is MobileGlUiState.Empty -> "找到 0 个构建产物（来自工作流 'MobileGL APK'）"
                     is MobileGlUiState.Loading -> "正在加载..."
                     is MobileGlUiState.Error -> "加载失败"
                 }
@@ -241,60 +248,75 @@ fun MobileGlScreen(
                 onRefresh = { viewModel.load() },
                 modifier = Modifier.fillMaxSize()
             ) {
-                when (val s = state) {
-                    is MobileGlUiState.Loading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator()
-                        }
-                    }
-                    is MobileGlUiState.Error -> {
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = s.message,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Button(onClick = { viewModel.load() }) {
-                                Text("重试")
+                AnimatedContent(
+                    targetState = state,
+                    modifier = Modifier.fillMaxSize(),
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(220)) + slideInVertically(
+                            animationSpec = tween(220),
+                            initialOffsetY = { it / 8 }
+                        ) togetherWith fadeOut(animationSpec = tween(180)) + slideOutVertically(
+                            animationSpec = tween(180),
+                            targetOffsetY = { -it / 8 }
+                        )
+                    },
+                    label = "mobilegl-state"
+                ) { target ->
+                    when (target) {
+                        is MobileGlUiState.Loading -> {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
                             }
                         }
-                    }
-                    is MobileGlUiState.Empty -> {
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Inbox,
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "暂无 APK 构建文件",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        is MobileGlUiState.Error -> {
+                            Column(
+                                modifier = Modifier.fillMaxSize().padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = target.message,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Button(onClick = { viewModel.load() }) {
+                                    Text("重试")
+                                }
+                            }
                         }
-                    }
-                    is MobileGlUiState.Success -> {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(items = s.items, key = { it.artifact.id }) { item ->
-                                MobileGlBuildCard(item)
+                        is MobileGlUiState.Empty -> {
+                            Column(
+                                modifier = Modifier.fillMaxSize().padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Inbox,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "暂无 APK 构建文件",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        is MobileGlUiState.Success -> {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(items = target.items, key = { it.artifact.id }) { item ->
+                                    MobileGlBuildCard(item, modifier = Modifier.animateItem())
+                                }
                             }
                         }
                     }
@@ -305,11 +327,11 @@ fun MobileGlScreen(
 }
 
 @Composable
-private fun MobileGlBuildCard(item: MobileGlBuildItem) {
+private fun MobileGlBuildCard(item: MobileGlBuildItem, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val artifact = item.artifact
     val run = item.run
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = artifact.name,
