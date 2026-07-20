@@ -1,5 +1,6 @@
 package com.uniaball.downloader.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -36,6 +37,11 @@ import com.uniaball.downloader.ui.screens.SettingsScreen
 fun MainScreen() {
     var current by remember { mutableStateOf(Destination.Home) }
     var subScreen by remember { mutableStateOf<SubScreen?>(null) }
+
+    // 子屏幕下拦截返回键：回到主页而不是退出应用
+    BackHandler(enabled = subScreen != null) {
+        subScreen = null
+    }
 
     val topBarTitle = when {
         subScreen is SubScreen.DesktopGlues -> "DesktopGlues Releases"

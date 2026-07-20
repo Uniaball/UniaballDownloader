@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -82,16 +83,22 @@ class OpenJdkViewModel : ViewModel() {
     private val _snackbar = MutableSharedFlow<String>()
     val snackbar: SharedFlow<String> = _snackbar.asSharedFlow()
 
-    private val _selectedVersion = MutableStateFlow(21)
-    val selectedVersion: StateFlow<Int> = _selectedVersion.asStateFlow()
+    private val _selectedVersion = MutableStateFlow<Int?>(null)
+    val selectedVersion: StateFlow<Int?> = _selectedVersion.asStateFlow()
 
     fun selectVersion(v: Int) {
         _selectedVersion.value = v
     }
 
     fun fetchBuilds() {
-        var hasContent = _uiState.value is OpenJdkUiState.Success
         val version = _selectedVersion.value
+        if (version == null) {
+            viewModelScope.launch {
+                _snackbar.emit("请先选择 OpenJDK 版本")
+            }
+            return
+        }
+        var hasContent = _uiState.value is OpenJdkUiState.Success
         if (!hasContent) {
             // 优先从磁盘缓存读取对应版本的 runs+artifacts，若有立即设 Success 态
             val cached = UniaballRepository.loadOpenJdkRunsFromDisk(version)
@@ -198,7 +205,8 @@ fun OpenJdkScreen(
 
     Scaffold(
         modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
             modifier = Modifier
@@ -212,9 +220,10 @@ fun OpenJdkScreen(
                 onExpandedChange = { menuExpanded = it }
             ) {
                 OutlinedTextField(
-                    value = "OpenJDK $selectedVersion",
+                    value = selectedVersion?.let { "OpenJDK $it" } ?: "",
                     onValueChange = {},
                     readOnly = true,
+                    placeholder = { Text("请选择 OpenJDK 版本") },
                     label = { Text("OpenJDK 版本") },
                     trailingIcon = {
                         ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded)
@@ -241,6 +250,7 @@ fun OpenJdkScreen(
 
             Button(
                 onClick = { viewModel.fetchBuilds() },
+                enabled = selectedVersion != null,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("获取构建")
