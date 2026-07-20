@@ -84,10 +84,10 @@ class OpenJdkViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val version = _selectedVersion.value
-                val page = UniaballRepository.listOpenJdkWorkflowRuns(version)
-                val runs = page.workflowRuns.take(10)
+                val page = UniaballRepository.listOpenJdkRuns(version)
+                val runs = page.workflowRuns.take(20)
                 if (runs.isEmpty()) {
-                    _uiState.value = OpenJdkUiState.Empty
+                    _uiState.value = OpenJdkUiState.Error("未找到 OpenJDK $version 的构建")
                     return@launch
                 }
                 val pairs = runs.map { run ->
@@ -219,7 +219,7 @@ private fun EmptyContent() {
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "该分支暂无构建产物",
+            text = "未发现可下载的构建文件",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -269,8 +269,16 @@ private fun BuildCard(
 ) {
     val artifact = item.artifact
     val run = item.run
+    val downloadUrl = remember(artifact.id, run.id) {
+        UniaballRepository.nightlyLinkUrl(
+            UniaballRepository.OPENJDK_OWNER,
+            UniaballRepository.OPENJDK_REPO,
+            run.id,
+            artifact.name
+        )
+    }
     Card(
-        onClick = { onDownload(artifact.archiveDownloadUrl) },
+        onClick = { onDownload(downloadUrl) },
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -307,7 +315,7 @@ private fun BuildCard(
                 }
             }
             FilledTonalButton(
-                onClick = { onDownload(artifact.archiveDownloadUrl) },
+                onClick = { onDownload(downloadUrl) },
                 enabled = !artifact.expired
             ) {
                 Text("下载")

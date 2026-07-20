@@ -88,10 +88,10 @@ class MobileGlViewModel : ViewModel() {
         }
         viewModelScope.launch {
             try {
-                val runsPage = UniaballRepository.listMobileGlWorkflowRuns()
+                val runsPage = UniaballRepository.listMobileGlRuns()
                 val runs = runsPage.workflowRuns.take(20)
                 if (runs.isEmpty()) {
-                    _uiState.value = MobileGlUiState.Empty
+                    _uiState.value = MobileGlUiState.Error("未找到工作流 \"MobileGL APK\" 的构建记录")
                     return@launch
                 }
                 val items = runs.map { run ->

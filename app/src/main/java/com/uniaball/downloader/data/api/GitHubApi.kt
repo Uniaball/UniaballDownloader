@@ -26,6 +26,15 @@ interface GitHubApi {
         @Query("page") page: Int = 1
     ): WorkflowRunPage
 
+    @GET("repos/{owner}/{repo}/actions/runs")
+    suspend fun listAllRuns(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Query("per_page") perPage: Int = 50,
+        @Query("sort") sort: String = "created",
+        @Query("direction") direction: String = "desc"
+    ): WorkflowRunPage
+
     @GET("repos/{owner}/{repo}/actions/runs/{run_id}/artifacts")
     suspend fun listArtifacts(
         @Path("owner") owner: String,

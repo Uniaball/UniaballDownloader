@@ -32,6 +32,10 @@ object UniaballRepository {
     const val MOBILEGL_REPO = "MobileGL"
     const val MOBILEGL_WORKFLOW_ID = "mobilegl-apk.yml"
 
+    // 网页版用于过滤 run.name 的关键字
+    const val RUN_NAME_MOBILEGL = "MobileGL APK"
+    const val NIGHTLY_LINK_BASE = "https://nightly.link/"
+
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
 
     private val authInterceptor = Interceptor { chain ->
@@ -72,6 +76,46 @@ object UniaballRepository {
     // ===== MobileGL workflow runs =====
     suspend fun listMobileGlWorkflowRuns(): WorkflowRunPage {
         return api.listWorkflowRuns(MOBILEGL_OWNER, MOBILEGL_REPO, MOBILEGL_WORKFLOW_ID)
+    }
+
+    suspend fun listAllRuns(owner: String, repo: String): WorkflowRunPage =
+        api.listAllRuns(owner, repo)
+
+    /**
+     * 拉取 OpenJDK-Android 仓库的全部 workflow runs，
+     * 按 run.name 模糊匹配（小写后包含 jdk{version} / openjdk{version} / java{version} 任一）。
+     * 与网页版 openjdk.html 的逻辑一致。
+     */
+    suspend fun listOpenJdkRuns(jdkVersion: Int): WorkflowRunPage {
+        val page = listAllRuns(OPENJDK_OWNER, OPENJDK_REPO)
+        val versionStr = jdkVersion.toString()
+        val lowerKeywords = listOf("jdk$versionStr", "openjdk$versionStr", "java$versionStr")
+        val filtered = page.workflowRuns.filter { run ->
+            val name = (run.name ?: "").lowercase()
+            lowerKeywords.any { name.contains(it) }
+        }
+        return page.copy(workflowRuns = filtered)
+    }
+
+    /**
+     * 拉取 MobileGL 仓库的全部 workflow runs，
+     * 按 run.name equals "MobileGL APK"（忽略大小写）过滤。
+     * 与网页版 mobilegl-actions.html 的逻辑一致。
+     */
+    suspend fun listMobileGlRuns(): WorkflowRunPage {
+        val page = listAllRuns(MOBILEGL_OWNER, MOBILEGL_REPO)
+        val filtered = page.workflowRuns.filter { run ->
+            (run.name ?: "").equals(RUN_NAME_MOBILEGL, ignoreCase = true)
+        }
+        return page.copy(workflowRuns = filtered)
+    }
+
+    /**
+     * 构造 nightly.link 下载 URL（用于 OpenJDK 屏幕的 artifact 下载）。
+     * 例如：https://nightly.link/Uniaball/OpenJDK-Android/actions/runs/12345/asset-name.zip
+     */
+    fun nightlyLinkUrl(owner: String, repo: String, runId: Long, artifactName: String): String {
+        return "${NIGHTLY_LINK_BASE}$owner/$repo/actions/runs/$runId/$artifactName.zip"
     }
 
     /**
