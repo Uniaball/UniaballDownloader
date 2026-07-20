@@ -48,6 +48,8 @@ import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.util.DownloadUtil
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -86,8 +88,60 @@ class OpenJdkViewModel : ViewModel() {
     private val _selectedVersion = MutableStateFlow<Int?>(null)
     val selectedVersion: StateFlow<Int?> = _selectedVersion.asStateFlow()
 
+    // 当前进行中的 fetch 协程；切换版本或重复点击"获取构建"时取消旧 Job，保证串行
+    private var fetchJob: Job? = null
+
+    // 加载守卫：网络请求期间为 true，UI 据此禁用"获取构建"按钮避免并发触发
+    private val _isFetching = MutableStateFlow(false)
+    val isFetching: StateFlow<Boolean> = _isFetching.asStateFlow()
+
     fun selectVersion(v: Int) {
+        // 取消进行中的 fetch Job，避免版本切换后旧协程继续向 _uiState 写入造成竞态
+        fetchJob?.cancel()
+        _isFetching.value = false
         _selectedVersion.value = v
+
+        // 按内存缓存 → 磁盘缓存顺序查找；命中且非空立即渲染 Success，未命中重置 Idle
+        val items = lookupCachedItems(v)
+        _uiState.value = if (items.isNotEmpty()) {
+            OpenJdkUiState.Success(items)
+        } else {
+            OpenJdkUiState.Idle
+        }
+    }
+
+    /**
+     * 按"内存缓存 → 磁盘缓存"顺序查找指定版本的 runs + artifacts，
+     * 拼装为 List<OpenJdkBuildItem>；任一层命中且非空即返回，否则返回空列表。
+     */
+    private fun lookupCachedItems(version: Int): List<OpenJdkBuildItem> {
+        // 1. 内存缓存
+        val memRuns = UniaballRepository.getCachedOpenJdkRuns(version)
+        if (memRuns != null && memRuns.workflowRuns.isNotEmpty()) {
+            val items = memRuns.workflowRuns.take(5).mapNotNull { run ->
+                val ap = UniaballRepository.getCachedArtifacts(
+                    UniaballRepository.OPENJDK_OWNER,
+                    UniaballRepository.OPENJDK_REPO,
+                    run.id
+                ) ?: return@mapNotNull null
+                ap.artifacts.map { OpenJdkBuildItem(it, run) }
+            }.flatten()
+            if (items.isNotEmpty()) return items
+        }
+        // 2. 磁盘缓存
+        val diskRuns = UniaballRepository.loadOpenJdkRunsFromDisk(version)
+        if (diskRuns != null && diskRuns.workflowRuns.isNotEmpty()) {
+            val items = diskRuns.workflowRuns.take(5).mapNotNull { run ->
+                val ap = UniaballRepository.loadArtifactsFromDisk(
+                    UniaballRepository.OPENJDK_OWNER,
+                    UniaballRepository.OPENJDK_REPO,
+                    run.id
+                ) ?: return@mapNotNull null
+                ap.artifacts.map { OpenJdkBuildItem(it, run) }
+            }.flatten()
+            if (items.isNotEmpty()) return items
+        }
+        return emptyList()
     }
 
     fun fetchBuilds() {
@@ -98,32 +152,22 @@ class OpenJdkViewModel : ViewModel() {
             }
             return
         }
-        var hasContent = _uiState.value is OpenJdkUiState.Success
-        if (!hasContent) {
-            // 优先从磁盘缓存读取对应版本的 runs+artifacts，若有立即设 Success 态
-            val cached = UniaballRepository.loadOpenJdkRunsFromDisk(version)
-            if (cached != null && cached.workflowRuns.isNotEmpty()) {
-                val runs = cached.workflowRuns.take(5)
-                val cachedItems = runs.mapNotNull { run ->
-                    val ap = UniaballRepository.loadArtifactsFromDisk(
-                        UniaballRepository.OPENJDK_OWNER,
-                        UniaballRepository.OPENJDK_REPO,
-                        run.id
-                    ) ?: return@mapNotNull null
-                    ap.artifacts.map { OpenJdkBuildItem(it, run) }
-                }.flatten()
-                if (cachedItems.isNotEmpty()) {
-                    _uiState.value = OpenJdkUiState.Success(cachedItems)
-                    hasContent = true
-                } else {
-                    _uiState.value = OpenJdkUiState.Loading
-                }
-            } else {
-                _uiState.value = OpenJdkUiState.Loading
-            }
+
+        // 取消上一个 fetch Job，保证任意时刻最多一个 fetch 协程处于 active 状态
+        fetchJob?.cancel()
+
+        // 统一按"内存 → 磁盘"顺序查找缓存（不再依赖 hasContent 决定是否查缓存）
+        val cachedItems = lookupCachedItems(version)
+        val hasContent = cachedItems.isNotEmpty()
+        if (hasContent) {
+            _uiState.value = OpenJdkUiState.Success(cachedItems)
+        } else {
+            _uiState.value = OpenJdkUiState.Loading
         }
 
-        // 节流
+        // 节流：无论 hasContent 都执行 isFresh 检查
+        // - 节流命中且有缓存数据：保持 Success 态，提示稍候再刷新，直接返回
+        // - 节流命中但无缓存数据（首次加载）：仍走网络
         if (hasContent && UniaballRepository.isFresh("openjdk_runs_$version")) {
             viewModelScope.launch {
                 _snackbar.emit("请稍候再刷新")
@@ -131,7 +175,8 @@ class OpenJdkViewModel : ViewModel() {
             return
         }
 
-        viewModelScope.launch {
+        _isFetching.value = true
+        fetchJob = viewModelScope.launch {
             try {
                 val page = UniaballRepository.listOpenJdkRuns(version)
                 val runs = page.workflowRuns.take(5)
@@ -164,6 +209,9 @@ class OpenJdkViewModel : ViewModel() {
                 } else {
                     _uiState.value = OpenJdkUiState.Success(items)
                 }
+            } catch (e: CancellationException) {
+                // 协程被取消时正确向上传播，避免被当作业务异常吞掉导致状态泄漏
+                throw e
             } catch (e: com.uniaball.downloader.data.repository.RateLimitedException) {
                 if (!hasContent) {
                     _uiState.value = OpenJdkUiState.Error(e.message ?: "GitHub API 速率限制")
@@ -176,6 +224,8 @@ class OpenJdkViewModel : ViewModel() {
                 } else {
                     _snackbar.emit(e.message ?: "刷新失败")
                 }
+            } finally {
+                _isFetching.value = false
             }
         }
     }
@@ -193,6 +243,7 @@ fun OpenJdkScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val selectedVersion by viewModel.selectedVersion.collectAsStateWithLifecycle()
+    val isFetching by viewModel.isFetching.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -250,7 +301,7 @@ fun OpenJdkScreen(
 
             Button(
                 onClick = { viewModel.fetchBuilds() },
-                enabled = selectedVersion != null,
+                enabled = selectedVersion != null && !isFetching,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("获取构建")
