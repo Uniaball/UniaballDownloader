@@ -4,12 +4,15 @@ import com.uniaball.downloader.data.api.GitHubApi
 import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.model.WorkflowRunPage
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
+
+class RateLimitedException(message: String) : Exception(message)
 
 object UniaballRepository {
 
@@ -38,6 +41,54 @@ object UniaballRepository {
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
 
+    // 403 退避（内存态，不持久化）
+    private const val RATE_LIMIT_BACKOFF_MS = 5L * 60 * 1000 // 5 分钟
+    @Volatile
+    private var rateLimitUntil: Long = 0L
+
+    // 内存缓存
+    private val releasesCache = mutableMapOf<String, List<GitHubRelease>>()
+    @Volatile
+    private var mobileGlRunsCacheValue: WorkflowRunPage? = null
+    private val openJdkRunsCache = mutableMapOf<Int, WorkflowRunPage>()
+    private val artifactCache = mutableMapOf<String, ArtifactPage>()
+
+    // 节流时间戳
+    private val lastFetchTimestamps = mutableMapOf<String, Long>()
+
+    // SharedPreferences 注入
+    private var appContext: android.content.Context? = null
+    private const val PREF_NAME = "uniaball_cache"
+    private const val KEY_DESKTOPGLUES_RELEASES = "cache_desktopglues_releases"
+    private const val KEY_MOBILEGL_RUNS = "cache_mobilegl_runs"
+    private const val KEY_OPENJDK_RUNS_PREFIX = "cache_openjdk_runs_"
+    private const val KEY_ARTIFACTS_PREFIX = "cache_artifacts_"
+
+    fun init(context: android.content.Context) {
+        appContext = context.applicationContext
+    }
+
+    private fun checkRateLimit() {
+        val now = System.currentTimeMillis()
+        if (now < rateLimitUntil) {
+            throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
+        }
+    }
+
+    private fun markRateLimited() {
+        rateLimitUntil = System.currentTimeMillis() + RATE_LIMIT_BACKOFF_MS
+    }
+
+    fun isFresh(key: String, throttleMs: Long = 30_000L): Boolean {
+        val now = System.currentTimeMillis()
+        val last = lastFetchTimestamps[key] ?: 0L
+        return now - last < throttleMs
+    }
+
+    private fun markFetched(key: String) {
+        lastFetchTimestamps[key] = System.currentTimeMillis()
+    }
+
     private val authInterceptor = Interceptor { chain ->
         val req = chain.request().newBuilder()
             .header("Accept", "application/vnd.github+json")
@@ -60,7 +111,20 @@ object UniaballRepository {
 
     // ===== DesktopGlues Releases =====
     suspend fun listDesktopGluesReleases(): List<GitHubRelease> {
-        return api.listReleases(DESKTOPGLUES_OWNER, DESKTOPGLUES_REPO)
+        checkRateLimit()
+        return try {
+            val result = api.listReleases(DESKTOPGLUES_OWNER, DESKTOPGLUES_REPO)
+            releasesCache[KEY_DESKTOPGLUES_RELEASES] = result
+            markFetched("desktopglues_releases")
+            saveToDisk(KEY_DESKTOPGLUES_RELEASES, result)
+            result
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 403) {
+                markRateLimited()
+                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
+            }
+            throw e
+        }
     }
 
     // ===== OpenJDK-Android workflow runs by branch (branch name 形如 "jdk-17" / "jdk-21" 等) =====
@@ -70,7 +134,21 @@ object UniaballRepository {
     }
 
     suspend fun listArtifactsForRun(owner: String, repo: String, runId: Long): ArtifactPage {
-        return api.listArtifacts(owner, repo, runId)
+        checkRateLimit()
+        val cacheKey = "${owner}_${repo}_$runId"
+        return try {
+            val result = api.listArtifacts(owner, repo, runId)
+            artifactCache[cacheKey] = result
+            markFetched("artifacts_$cacheKey")
+            saveToDisk("$KEY_ARTIFACTS_PREFIX${cacheKey}", result)
+            result
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 403) {
+                markRateLimited()
+                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
+            }
+            throw e
+        }
     }
 
     // ===== MobileGL workflow runs =====
@@ -87,14 +165,27 @@ object UniaballRepository {
      * 与网页版 openjdk.html 的逻辑一致。
      */
     suspend fun listOpenJdkRuns(jdkVersion: Int): WorkflowRunPage {
-        val page = listAllRuns(OPENJDK_OWNER, OPENJDK_REPO)
-        val versionStr = jdkVersion.toString()
-        val lowerKeywords = listOf("jdk$versionStr", "openjdk$versionStr", "java$versionStr")
-        val filtered = page.workflowRuns.filter { run ->
-            val name = (run.name ?: "").lowercase()
-            lowerKeywords.any { name.contains(it) }
+        checkRateLimit()
+        return try {
+            val page = listAllRuns(OPENJDK_OWNER, OPENJDK_REPO)
+            val versionStr = jdkVersion.toString()
+            val lowerKeywords = listOf("jdk$versionStr", "openjdk$versionStr", "java$versionStr")
+            val filtered = page.workflowRuns.filter { run ->
+                val name = (run.name ?: "").lowercase()
+                lowerKeywords.any { name.contains(it) }
+            }
+            val result = page.copy(workflowRuns = filtered)
+            openJdkRunsCache[jdkVersion] = result
+            markFetched("openjdk_runs_$jdkVersion")
+            saveToDisk("$KEY_OPENJDK_RUNS_PREFIX$jdkVersion", result)
+            result
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 403) {
+                markRateLimited()
+                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
+            }
+            throw e
         }
-        return page.copy(workflowRuns = filtered)
     }
 
     /**
@@ -103,11 +194,24 @@ object UniaballRepository {
      * 与网页版 mobilegl-actions.html 的逻辑一致。
      */
     suspend fun listMobileGlRuns(): WorkflowRunPage {
-        val page = listAllRuns(MOBILEGL_OWNER, MOBILEGL_REPO)
-        val filtered = page.workflowRuns.filter { run ->
-            (run.name ?: "").equals(RUN_NAME_MOBILEGL, ignoreCase = true)
+        checkRateLimit()
+        return try {
+            val page = listAllRuns(MOBILEGL_OWNER, MOBILEGL_REPO)
+            val filtered = page.workflowRuns.filter { run ->
+                (run.name ?: "").equals(RUN_NAME_MOBILEGL, ignoreCase = true)
+            }
+            val result = page.copy(workflowRuns = filtered)
+            mobileGlRunsCacheValue = result
+            markFetched("mobilegl_runs")
+            saveToDisk(KEY_MOBILEGL_RUNS, result)
+            result
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 403) {
+                markRateLimited()
+                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
+            }
+            throw e
         }
-        return page.copy(workflowRuns = filtered)
     }
 
     /**
@@ -129,5 +233,49 @@ object UniaballRepository {
         if (url.isBlank()) return url
         if (url.startsWith(GH_PROXY)) return url
         return GH_PROXY + url
+    }
+
+    // ===== 内存缓存读取 =====
+    fun getCachedDesktopGluesReleases(): List<GitHubRelease>? = releasesCache[KEY_DESKTOPGLUES_RELEASES]
+    fun getCachedMobileGlRuns(): WorkflowRunPage? = mobileGlRunsCacheValue
+    fun getCachedOpenJdkRuns(jdkVersion: Int): WorkflowRunPage? = openJdkRunsCache[jdkVersion]
+    fun getCachedArtifacts(owner: String, repo: String, runId: Long): ArtifactPage? =
+        artifactCache["${owner}_${repo}_$runId"]
+
+    // ===== 磁盘缓存读取（启动时调用） =====
+    fun loadDesktopGluesReleasesFromDisk(): List<GitHubRelease>? =
+        loadFromDisk(KEY_DESKTOPGLUES_RELEASES) ?: releasesCache[KEY_DESKTOPGLUES_RELEASES]
+    fun loadMobileGlRunsFromDisk(): WorkflowRunPage? {
+        return loadFromDisk(KEY_MOBILEGL_RUNS) ?: mobileGlRunsCacheValue
+    }
+    fun loadOpenJdkRunsFromDisk(jdkVersion: Int): WorkflowRunPage? {
+        return loadFromDisk("$KEY_OPENJDK_RUNS_PREFIX$jdkVersion") ?: openJdkRunsCache[jdkVersion]
+    }
+    fun loadArtifactsFromDisk(owner: String, repo: String, runId: Long): ArtifactPage? {
+        return loadFromDisk("$KEY_ARTIFACTS_PREFIX${owner}_${repo}_$runId") ?: artifactCache["${owner}_${repo}_$runId"]
+    }
+
+    // ===== 内部 SharedPreferences 读写 =====
+    private fun prefs(): android.content.SharedPreferences? =
+        appContext?.getSharedPreferences(PREF_NAME, android.content.Context.MODE_PRIVATE)
+
+    private inline fun <reified T> loadFromDisk(key: String): T? {
+        val p = prefs() ?: return null
+        val str = p.getString(key, null) ?: return null
+        return try {
+            json.decodeFromString(str)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private inline fun <reified T> saveToDisk(key: String, value: T) {
+        val p = prefs() ?: return
+        try {
+            val str = json.encodeToString(value)
+            p.edit().putString(key, str).apply()
+        } catch (e: Exception) {
+            // ignore
+        }
     }
 }

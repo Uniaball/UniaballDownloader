@@ -22,8 +22,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,8 +49,11 @@ import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -72,6 +79,9 @@ class OpenJdkViewModel : ViewModel() {
     private val _uiState = MutableStateFlow<OpenJdkUiState>(OpenJdkUiState.Idle)
     val uiState: StateFlow<OpenJdkUiState> = _uiState.asStateFlow()
 
+    private val _snackbar = MutableSharedFlow<String>()
+    val snackbar: SharedFlow<String> = _snackbar.asSharedFlow()
+
     private val _selectedVersion = MutableStateFlow(21)
     val selectedVersion: StateFlow<Int> = _selectedVersion.asStateFlow()
 
@@ -80,14 +90,50 @@ class OpenJdkViewModel : ViewModel() {
     }
 
     fun fetchBuilds() {
-        _uiState.value = OpenJdkUiState.Loading
+        var hasContent = _uiState.value is OpenJdkUiState.Success
+        val version = _selectedVersion.value
+        if (!hasContent) {
+            // 优先从磁盘缓存读取对应版本的 runs+artifacts，若有立即设 Success 态
+            val cached = UniaballRepository.loadOpenJdkRunsFromDisk(version)
+            if (cached != null && cached.workflowRuns.isNotEmpty()) {
+                val runs = cached.workflowRuns.take(5)
+                val cachedItems = runs.mapNotNull { run ->
+                    val ap = UniaballRepository.loadArtifactsFromDisk(
+                        UniaballRepository.OPENJDK_OWNER,
+                        UniaballRepository.OPENJDK_REPO,
+                        run.id
+                    ) ?: return@mapNotNull null
+                    ap.artifacts.map { OpenJdkBuildItem(it, run) }
+                }.flatten()
+                if (cachedItems.isNotEmpty()) {
+                    _uiState.value = OpenJdkUiState.Success(cachedItems)
+                    hasContent = true
+                } else {
+                    _uiState.value = OpenJdkUiState.Loading
+                }
+            } else {
+                _uiState.value = OpenJdkUiState.Loading
+            }
+        }
+
+        // 节流
+        if (hasContent && UniaballRepository.isFresh("openjdk_runs_$version")) {
+            viewModelScope.launch {
+                _snackbar.emit("请稍候再刷新")
+            }
+            return
+        }
+
         viewModelScope.launch {
             try {
-                val version = _selectedVersion.value
                 val page = UniaballRepository.listOpenJdkRuns(version)
-                val runs = page.workflowRuns.take(20)
+                val runs = page.workflowRuns.take(5)
                 if (runs.isEmpty()) {
-                    _uiState.value = OpenJdkUiState.Error("未找到 OpenJDK $version 的构建")
+                    if (!hasContent) {
+                        _uiState.value = OpenJdkUiState.Error("未找到 OpenJDK $version 的构建")
+                    } else {
+                        _snackbar.emit("未找到新的构建记录")
+                    }
                     return@launch
                 }
                 val pairs = runs.map { run ->
@@ -102,13 +148,27 @@ class OpenJdkViewModel : ViewModel() {
                 val items = pairs.flatMap { (ap, run) ->
                     ap.artifacts.map { OpenJdkBuildItem(it, run) }
                 }
-                _uiState.value = if (items.isEmpty()) {
-                    OpenJdkUiState.Empty
+                if (items.isEmpty()) {
+                    if (!hasContent) {
+                        _uiState.value = OpenJdkUiState.Empty
+                    } else {
+                        _snackbar.emit("未找到可下载的 artifacts")
+                    }
                 } else {
-                    OpenJdkUiState.Success(items)
+                    _uiState.value = OpenJdkUiState.Success(items)
+                }
+            } catch (e: com.uniaball.downloader.data.repository.RateLimitedException) {
+                if (!hasContent) {
+                    _uiState.value = OpenJdkUiState.Error(e.message ?: "GitHub API 速率限制")
+                } else {
+                    _snackbar.emit(e.message ?: "GitHub API 速率限制")
                 }
             } catch (e: Exception) {
-                _uiState.value = OpenJdkUiState.Error(e.message ?: "未知错误")
+                if (!hasContent) {
+                    _uiState.value = OpenJdkUiState.Error(e.message ?: "未知错误")
+                } else {
+                    _snackbar.emit(e.message ?: "刷新失败")
+                }
             }
         }
     }
@@ -120,70 +180,91 @@ private val JDK_VERSIONS = listOf(17, 21, 25, 26, 27, 28)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OpenJdkScreen(modifier: Modifier = Modifier) {
-    val viewModel: OpenJdkViewModel = viewModel()
+fun OpenJdkScreen(
+    modifier: Modifier = Modifier,
+    viewModel: OpenJdkViewModel = viewModel()
+) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val selectedVersion by viewModel.selectedVersion.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        ExposedDropdownMenuBox(
-            expanded = menuExpanded,
-            onExpandedChange = { menuExpanded = it }
+    LaunchedEffect(Unit) {
+        viewModel.snackbar.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
+        }
+    }
+
+    Scaffold(
+        modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            OutlinedTextField(
-                value = "OpenJDK $selectedVersion",
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("OpenJDK 版本") },
-                trailingIcon = {
-                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .menuAnchor()
-            )
-            ExposedDropdownMenu(
+            ExposedDropdownMenuBox(
                 expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false }
+                onExpandedChange = { menuExpanded = it }
             ) {
-                JDK_VERSIONS.forEach { v ->
-                    DropdownMenuItem(
-                        text = { Text("OpenJDK $v") },
-                        onClick = {
-                            viewModel.selectVersion(v)
-                            menuExpanded = false
-                        }
-                    )
+                OutlinedTextField(
+                    value = "OpenJDK $selectedVersion",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("OpenJDK 版本") },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor()
+                )
+                ExposedDropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    JDK_VERSIONS.forEach { v ->
+                        DropdownMenuItem(
+                            text = { Text("OpenJDK $v") },
+                            onClick = {
+                                viewModel.selectVersion(v)
+                                menuExpanded = false
+                            }
+                        )
+                    }
                 }
             }
-        }
 
-        Button(
-            onClick = { viewModel.fetchBuilds() },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("获取构建")
-        }
+            Button(
+                onClick = { viewModel.fetchBuilds() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("获取构建")
+            }
 
-        when (val s = uiState) {
-            OpenJdkUiState.Idle -> IdleContent()
-            OpenJdkUiState.Loading -> LoadingContent()
-            is OpenJdkUiState.Success -> BuildsList(
-                items = s.items,
-                onDownload = { url -> DownloadUtil.openDownload(context, url) }
+            Text(
+                text = "仅展示最近 5 次构建的 artifacts",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            is OpenJdkUiState.Error -> ErrorContent(
-                message = s.message,
-                onRetry = { viewModel.fetchBuilds() }
-            )
-            OpenJdkUiState.Empty -> EmptyContent()
+
+            when (val s = uiState) {
+                OpenJdkUiState.Idle -> IdleContent()
+                OpenJdkUiState.Loading -> LoadingContent()
+                is OpenJdkUiState.Success -> BuildsList(
+                    items = s.items,
+                    onDownload = { url -> DownloadUtil.openDownload(context, url) }
+                )
+                is OpenJdkUiState.Error -> ErrorContent(
+                    message = s.message,
+                    onRetry = { viewModel.fetchBuilds() }
+                )
+                OpenJdkUiState.Empty -> EmptyContent()
+            }
         }
     }
 }

@@ -26,10 +26,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -46,8 +51,11 @@ import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.util.DownloadUtil
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -62,17 +70,56 @@ class DesktopGluesViewModel : ViewModel() {
     private val _uiState = MutableStateFlow<DesktopGluesUiState>(DesktopGluesUiState.Loading)
     val uiState: StateFlow<DesktopGluesUiState> = _uiState.asStateFlow()
 
+    private val _snackbar = MutableSharedFlow<String>()
+    val snackbar: SharedFlow<String> = _snackbar.asSharedFlow()
+
     init { load() }
 
     fun load() {
+        var hasContent = _uiState.value is DesktopGluesUiState.Success
+        if (!hasContent) {
+            // 优先从磁盘缓存读取 releases，若有立即设 Success 态
+            val cached = UniaballRepository.loadDesktopGluesReleasesFromDisk()
+            if (cached != null && cached.isNotEmpty()) {
+                _uiState.value = DesktopGluesUiState.Success(cached)
+                hasContent = true
+            } else {
+                _uiState.value = DesktopGluesUiState.Loading
+            }
+        }
+
+        // 节流
+        if (hasContent && UniaballRepository.isFresh("desktopglues_releases")) {
+            viewModelScope.launch {
+                _snackbar.emit("请稍候再刷新")
+            }
+            return
+        }
+
         viewModelScope.launch {
-            _uiState.value = DesktopGluesUiState.Loading
             try {
                 val releases = UniaballRepository.listDesktopGluesReleases()
-                _uiState.value = if (releases.isEmpty()) DesktopGluesUiState.Empty
-                else DesktopGluesUiState.Success(releases)
+                if (releases.isEmpty()) {
+                    if (!hasContent) {
+                        _uiState.value = DesktopGluesUiState.Empty
+                    } else {
+                        _snackbar.emit("未找到新的构建记录")
+                    }
+                } else {
+                    _uiState.value = DesktopGluesUiState.Success(releases)
+                }
+            } catch (e: com.uniaball.downloader.data.repository.RateLimitedException) {
+                if (!hasContent) {
+                    _uiState.value = DesktopGluesUiState.Error(e.message ?: "GitHub API 速率限制")
+                } else {
+                    _snackbar.emit(e.message ?: "GitHub API 速率限制")
+                }
             } catch (e: Exception) {
-                _uiState.value = DesktopGluesUiState.Error(e.message ?: "加载失败")
+                if (!hasContent) {
+                    _uiState.value = DesktopGluesUiState.Error(e.message ?: "加载失败")
+                } else {
+                    _snackbar.emit(e.message ?: "刷新失败")
+                }
             }
         }
     }
@@ -82,14 +129,27 @@ class DesktopGluesViewModel : ViewModel() {
 fun DesktopGluesScreen(modifier: Modifier = Modifier) {
     val viewModel: DesktopGluesViewModel = viewModel { DesktopGluesViewModel() }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    when (val s = state) {
-        DesktopGluesUiState.Loading -> Box(
-            modifier = modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) { CircularProgressIndicator() }
-        is DesktopGluesUiState.Error -> ErrorView(s.message, { viewModel.load() }, modifier)
-        DesktopGluesUiState.Empty -> EmptyView(modifier)
-        is DesktopGluesUiState.Success -> SuccessView(s.releases, modifier)
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        viewModel.snackbar.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
+        }
+    }
+
+    Scaffold(
+        modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { padding ->
+        when (val s = state) {
+            DesktopGluesUiState.Loading -> Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) { CircularProgressIndicator() }
+            is DesktopGluesUiState.Error -> ErrorView(s.message, { viewModel.load() }, Modifier.fillMaxSize().padding(padding))
+            DesktopGluesUiState.Empty -> EmptyView(Modifier.fillMaxSize().padding(padding))
+            is DesktopGluesUiState.Success -> SuccessView(s.releases, Modifier.fillMaxSize().padding(padding))
+        }
     }
 }
 

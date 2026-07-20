@@ -23,12 +23,17 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -47,8 +52,11 @@ import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -75,23 +83,60 @@ class MobileGlViewModel : ViewModel() {
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+    private val _snackbar = MutableSharedFlow<String>()
+    val snackbar: SharedFlow<String> = _snackbar.asSharedFlow()
+
     init {
         load()
     }
 
     fun load() {
-        val hasContent = _uiState.value is MobileGlUiState.Success
+        var hasContent = _uiState.value is MobileGlUiState.Success
         if (!hasContent) {
-            _uiState.value = MobileGlUiState.Loading
+            // 优先从内存/磁盘缓存读取 artifacts，若有立即设 Success 态并标记 hasContent=true
+            val cached = UniaballRepository.loadMobileGlRunsFromDisk()
+            if (cached != null && cached.workflowRuns.isNotEmpty()) {
+                val runs = cached.workflowRuns.take(5)
+                val cachedItems = runs.mapNotNull { run ->
+                    val ap = UniaballRepository.loadArtifactsFromDisk(
+                        UniaballRepository.MOBILEGL_OWNER,
+                        UniaballRepository.MOBILEGL_REPO,
+                        run.id
+                    ) ?: return@mapNotNull null
+                    ap.artifacts.map { artifact -> MobileGlBuildItem(artifact, run) }
+                }.flatten().sortedByDescending { it.artifact.createdAt }
+                if (cachedItems.isNotEmpty()) {
+                    _uiState.value = MobileGlUiState.Success(cachedItems)
+                    hasContent = true
+                } else {
+                    _uiState.value = MobileGlUiState.Loading
+                }
+            } else {
+                _uiState.value = MobileGlUiState.Loading
+            }
         } else {
             _isRefreshing.value = true
         }
+
+        // 节流：30 秒内不重复请求
+        if (hasContent && UniaballRepository.isFresh("mobilegl_runs")) {
+            viewModelScope.launch {
+                _snackbar.emit("请稍候再刷新")
+                _isRefreshing.value = false
+            }
+            return
+        }
+
         viewModelScope.launch {
             try {
                 val runsPage = UniaballRepository.listMobileGlRuns()
-                val runs = runsPage.workflowRuns.take(20)
+                val runs = runsPage.workflowRuns.take(5)
                 if (runs.isEmpty()) {
-                    _uiState.value = MobileGlUiState.Error("未找到工作流 \"MobileGL APK\" 的构建记录")
+                    if (!hasContent) {
+                        _uiState.value = MobileGlUiState.Error("未找到工作流 \"MobileGL APK\" 的构建记录")
+                    } else {
+                        _snackbar.emit("未找到新的构建记录")
+                    }
                     return@launch
                 }
                 val items = runs.map { run ->
@@ -105,10 +150,26 @@ class MobileGlViewModel : ViewModel() {
                 }.awaitAll()
                     .flatten()
                     .sortedByDescending { it.artifact.createdAt }
-                _uiState.value = if (items.isEmpty()) MobileGlUiState.Empty else MobileGlUiState.Success(items)
+                if (items.isEmpty()) {
+                    if (!hasContent) {
+                        _uiState.value = MobileGlUiState.Empty
+                    } else {
+                        _snackbar.emit("未找到可下载的 artifacts")
+                    }
+                } else {
+                    _uiState.value = MobileGlUiState.Success(items)
+                }
+            } catch (e: com.uniaball.downloader.data.repository.RateLimitedException) {
+                if (!hasContent) {
+                    _uiState.value = MobileGlUiState.Error(e.message ?: "GitHub API 速率限制")
+                } else {
+                    _snackbar.emit(e.message ?: "GitHub API 速率限制")
+                }
             } catch (e: Exception) {
                 if (!hasContent) {
                     _uiState.value = MobileGlUiState.Error(e.message ?: "加载失败")
+                } else {
+                    _snackbar.emit(e.message ?: "刷新失败")
                 }
             } finally {
                 _isRefreshing.value = false
@@ -127,94 +188,112 @@ fun MobileGlScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        Column(modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text = "MobileGL APK",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "来自 GitHub Actions 的 APK 构建",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            val countText = when (state) {
-                is MobileGlUiState.Success -> "找到 ${(state as MobileGlUiState.Success).items.size} 个 APK 构建文件（来自工作流 'MobileGL APK'）"
-                is MobileGlUiState.Empty -> "找到 0 个 APK 构建文件（来自工作流 'MobileGL APK'）"
-                is MobileGlUiState.Loading -> "正在加载..."
-                is MobileGlUiState.Error -> "加载失败"
-            }
-            Text(
-                text = countText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    LaunchedEffect(Unit) {
+        viewModel.snackbar.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
         }
+    }
 
-        PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = { viewModel.load() },
-            modifier = Modifier.fillMaxSize()
-        ) {
-            when (val s = state) {
-                is MobileGlUiState.Loading -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
+    Scaffold(
+        modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { padding ->
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            Column(modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    text = "MobileGL APK",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "来自 GitHub Actions 的 APK 构建",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                val countText = when (state) {
+                    is MobileGlUiState.Success -> "找到 ${(state as MobileGlUiState.Success).items.size} 个 APK 构建文件（来自工作流 'MobileGL APK'）"
+                    is MobileGlUiState.Empty -> "找到 0 个 APK 构建文件（来自工作流 'MobileGL APK'）"
+                    is MobileGlUiState.Loading -> "正在加载..."
+                    is MobileGlUiState.Error -> "加载失败"
                 }
-                is MobileGlUiState.Error -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = s.message,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(onClick = { viewModel.load() }) {
-                            Text("重试")
+                Text(
+                    text = countText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "仅展示最近 5 次构建的 artifacts",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = { viewModel.load() },
+                modifier = Modifier.fillMaxSize()
+            ) {
+                when (val s = state) {
+                    is MobileGlUiState.Loading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
                         }
                     }
-                }
-                is MobileGlUiState.Empty -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Inbox,
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "暂无 APK 构建文件",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    is MobileGlUiState.Error -> {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = s.message,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(onClick = { viewModel.load() }) {
+                                Text("重试")
+                            }
+                        }
                     }
-                }
-                is MobileGlUiState.Success -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(items = s.items, key = { it.artifact.id }) { item ->
-                            MobileGlBuildCard(item)
+                    is MobileGlUiState.Empty -> {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Inbox,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "暂无 APK 构建文件",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    is MobileGlUiState.Success -> {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(items = s.items, key = { it.artifact.id }) { item ->
+                                MobileGlBuildCard(item)
+                            }
                         }
                     }
                 }
