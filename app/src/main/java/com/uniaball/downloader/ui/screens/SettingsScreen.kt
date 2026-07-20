@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.uniaball.downloader.BuildConfig
 import com.uniaball.downloader.data.repository.UniaballRepository
 
 @Composable
@@ -99,7 +100,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 runCatching {
                     val intent = Intent(
                         Intent.ACTION_VIEW,
-                        Uri.parse("https://github.com/Uniaball/Uniaball.github.io/blob/main/README.md")
+                        Uri.parse("https://github.com/Uniaball/UniaballDownloader/blob/main/README.md")
                     )
                     context.startActivity(intent)
                 }
@@ -137,7 +138,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "版本：v1.0.6",
+            text = "版本：v${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
