@@ -107,22 +107,66 @@ class OpenJdkViewModel : ViewModel() {
         fetchJob?.cancel()
         _isFetching.value = false
         _selectedVersion.value = v
+        _uiState.value = OpenJdkUiState.Idle  // 立即清旧版本数据
 
-        // 按内存缓存 → 磁盘缓存顺序查找；命中且非空立即渲染 Success，未命中重置 Idle
-        val items = lookupCachedItems(v)
-        _uiState.value = if (items.isNotEmpty()) {
-            OpenJdkUiState.Success(items)
-        } else {
-            OpenJdkUiState.Idle
+        // 异步查缓存：磁盘 JSON 反序列化移出主线程，避免 ANR
+        // 复用 fetchJob 字段统一管理，确保任意时刻最多一个后台协程
+        fetchJob = viewModelScope.launch {
+            val items = lookupCachedItems(v)
+            if (items.isNotEmpty()) {
+                _uiState.value = OpenJdkUiState.Success(items)
+            }
+            // 未命中保持 Idle，不主动调用 fetchBuilds
         }
     }
 
     /**
-     * 按"内存缓存 → 磁盘缓存"顺序查找指定版本的 runs + artifacts，
-     * 拼装为 List<OpenJdkBuildItem>；任一层命中且非空即返回，否则返回空列表。
+     * 按"allRuns 内存 → allRuns 磁盘 → 按 version 单独缓存（兼容旧数据）"顺序
+     * 查找指定版本的 runs + artifacts，拼装为 List<OpenJdkBuildItem>；
+     * 任一层命中且非空即返回，否则返回空列表。
+     * 改为 suspend：所有磁盘 JSON 反序列化在协程内执行，避免主线程 ANR。
      */
-    private fun lookupCachedItems(version: Int): List<OpenJdkBuildItem> {
-        // 1. 内存缓存
+    private suspend fun lookupCachedItems(version: Int): List<OpenJdkBuildItem> {
+        val versionStr = version.toString()
+        val lowerKeywords = listOf("jdk$versionStr", "openjdk$versionStr", "java$versionStr")
+
+        // 1. allRuns 内存缓存
+        val memAll = UniaballRepository.getCachedAllRuns()
+        if (memAll != null && memAll.workflowRuns.isNotEmpty()) {
+            val filtered = memAll.workflowRuns.filter { run ->
+                val name = (run.name ?: "").lowercase()
+                lowerKeywords.any { name.contains(it) }
+            }
+            val items = filtered.take(5).mapNotNull { run ->
+                val ap = UniaballRepository.getCachedArtifacts(
+                    UniaballRepository.OPENJDK_OWNER,
+                    UniaballRepository.OPENJDK_REPO,
+                    run.id
+                ) ?: return@mapNotNull null
+                ap.artifacts.map { OpenJdkBuildItem(it, run) }
+            }.flatten()
+            if (items.isNotEmpty()) return items
+        }
+
+        // 2. allRuns 磁盘缓存
+        val diskAll = UniaballRepository.loadAllRunsFromDisk()
+        if (diskAll != null && diskAll.workflowRuns.isNotEmpty()) {
+            val filtered = diskAll.workflowRuns.filter { run ->
+                val name = (run.name ?: "").lowercase()
+                lowerKeywords.any { name.contains(it) }
+            }
+            val items = filtered.take(5).mapNotNull { run ->
+                val ap = UniaballRepository.loadArtifactsFromDisk(
+                    UniaballRepository.OPENJDK_OWNER,
+                    UniaballRepository.OPENJDK_REPO,
+                    run.id
+                ) ?: return@mapNotNull null
+                ap.artifacts.map { OpenJdkBuildItem(it, run) }
+            }.flatten()
+            if (items.isNotEmpty()) return items
+        }
+
+        // 3. 兼容回退：按 version 单独的内存/磁盘缓存（旧数据兼容）
         val memRuns = UniaballRepository.getCachedOpenJdkRuns(version)
         if (memRuns != null && memRuns.workflowRuns.isNotEmpty()) {
             val items = memRuns.workflowRuns.take(5).mapNotNull { run ->
@@ -135,7 +179,6 @@ class OpenJdkViewModel : ViewModel() {
             }.flatten()
             if (items.isNotEmpty()) return items
         }
-        // 2. 磁盘缓存
         val diskRuns = UniaballRepository.loadOpenJdkRunsFromDisk(version)
         if (diskRuns != null && diskRuns.workflowRuns.isNotEmpty()) {
             val items = diskRuns.workflowRuns.take(5).mapNotNull { run ->
@@ -160,31 +203,24 @@ class OpenJdkViewModel : ViewModel() {
             return
         }
 
-        // 取消上一个 fetch Job，保证任意时刻最多一个 fetch 协程处于 active 状态
         fetchJob?.cancel()
-
-        // 统一按"内存 → 磁盘"顺序查找缓存（不再依赖 hasContent 决定是否查缓存）
-        val cachedItems = lookupCachedItems(version)
-        val hasContent = cachedItems.isNotEmpty()
-        if (hasContent) {
-            _uiState.value = OpenJdkUiState.Success(cachedItems)
-        } else {
-            _uiState.value = OpenJdkUiState.Loading
-        }
-
-        // 节流：无论 hasContent 都执行 isFresh 检查
-        // - 节流命中且有缓存数据：保持 Success 态，提示稍候再刷新，直接返回
-        // - 节流命中但无缓存数据（首次加载）：仍走网络
-        if (hasContent && UniaballRepository.isFresh("openjdk_runs_$version")) {
-            viewModelScope.launch {
-                _snackbar.emit("请稍候再刷新")
-            }
-            return
-        }
-
+        _uiState.value = OpenJdkUiState.Loading
         _isFetching.value = true
+
         fetchJob = viewModelScope.launch {
             try {
+                // 协程内查缓存：磁盘 JSON 反序列化移出主线程，避免 ANR
+                val cachedItems = lookupCachedItems(version)
+                val hasContent = cachedItems.isNotEmpty()
+                if (hasContent) {
+                    _uiState.value = OpenJdkUiState.Success(cachedItems)
+                }
+                // 节流检查：使用共享键 openjdk_all_runs，命中且有缓存数据 → 维持 Success
+                if (hasContent && UniaballRepository.isFresh("openjdk_all_runs")) {
+                    _snackbar.emit("请稍候再刷新")
+                    return@launch
+                }
+                // 网络请求
                 val page = UniaballRepository.listOpenJdkRuns(version)
                 val runs = page.workflowRuns.take(5)
                 if (runs.isEmpty()) {
@@ -220,13 +256,13 @@ class OpenJdkViewModel : ViewModel() {
                 // 协程被取消时正确向上传播，避免被当作业务异常吞掉导致状态泄漏
                 throw e
             } catch (e: com.uniaball.downloader.data.repository.RateLimitedException) {
-                if (!hasContent) {
+                if (_uiState.value !is OpenJdkUiState.Success) {
                     _uiState.value = OpenJdkUiState.Error(e.message ?: "GitHub API 速率限制")
                 } else {
                     _snackbar.emit(e.message ?: "GitHub API 速率限制")
                 }
             } catch (e: Exception) {
-                if (!hasContent) {
+                if (_uiState.value !is OpenJdkUiState.Success) {
                     _uiState.value = OpenJdkUiState.Error(e.message ?: "未知错误")
                 } else {
                     _snackbar.emit(e.message ?: "刷新失败")

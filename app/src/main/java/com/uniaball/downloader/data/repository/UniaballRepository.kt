@@ -50,6 +50,8 @@ object UniaballRepository {
     private val releasesCache = mutableMapOf<String, List<GitHubRelease>>()
     @Volatile
     private var mobileGlRunsCacheValue: WorkflowRunPage? = null
+    @Volatile
+    private var allRunsCache: WorkflowRunPage? = null
     private val openJdkRunsCache = mutableMapOf<Int, WorkflowRunPage>()
     private val artifactCache = mutableMapOf<String, ArtifactPage>()
 
@@ -62,6 +64,7 @@ object UniaballRepository {
     private const val KEY_DESKTOPGLUES_RELEASES = "cache_desktopglues_releases"
     private const val KEY_MOBILEGL_RUNS = "cache_mobilegl_runs"
     private const val KEY_OPENJDK_RUNS_PREFIX = "cache_openjdk_runs_"
+    private const val KEY_OPENJDK_ALL_RUNS = "cache_openjdk_all_runs"
     private const val KEY_ARTIFACTS_PREFIX = "cache_artifacts_"
 
     fun init(context: android.content.Context) {
@@ -160,6 +163,33 @@ object UniaballRepository {
         api.listAllRuns(owner, repo)
 
     /**
+     * 带统一缓存的 listAllRuns 封装：所有版本共享同一份 allRuns 数据。
+     * - 内存缓存命中且节流期内（30s）→ 直接返回，不发请求
+     * - 否则发请求并更新内存/磁盘缓存 + 节流时间戳
+     * - HTTP 403 → 标记退避 + 抛 RateLimitedException
+     */
+    suspend fun listAllRunsCached(owner: String, repo: String): WorkflowRunPage {
+        // 内存缓存命中且节流期内：直接返回，不发请求
+        if (allRunsCache != null && isFresh("openjdk_all_runs")) {
+            return allRunsCache!!
+        }
+        checkRateLimit()
+        return try {
+            val result = api.listAllRuns(owner, repo)
+            allRunsCache = result
+            markFetched("openjdk_all_runs")
+            saveToDisk(KEY_OPENJDK_ALL_RUNS, result)
+            result
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 403) {
+                markRateLimited()
+                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
+            }
+            throw e
+        }
+    }
+
+    /**
      * 拉取 OpenJDK-Android 仓库的全部 workflow runs，
      * 按 run.name 模糊匹配（小写后包含 jdk{version} / openjdk{version} / java{version} 任一）。
      * 与网页版 openjdk.html 的逻辑一致。
@@ -167,7 +197,7 @@ object UniaballRepository {
     suspend fun listOpenJdkRuns(jdkVersion: Int): WorkflowRunPage {
         checkRateLimit()
         return try {
-            val page = listAllRuns(OPENJDK_OWNER, OPENJDK_REPO)
+            val page = listAllRunsCached(OPENJDK_OWNER, OPENJDK_REPO)
             val versionStr = jdkVersion.toString()
             val lowerKeywords = listOf("jdk$versionStr", "openjdk$versionStr", "java$versionStr")
             val filtered = page.workflowRuns.filter { run ->
@@ -176,8 +206,6 @@ object UniaballRepository {
             }
             val result = page.copy(workflowRuns = filtered)
             openJdkRunsCache[jdkVersion] = result
-            markFetched("openjdk_runs_$jdkVersion")
-            saveToDisk("$KEY_OPENJDK_RUNS_PREFIX$jdkVersion", result)
             result
         } catch (e: retrofit2.HttpException) {
             if (e.code() == 403) {
@@ -238,6 +266,7 @@ object UniaballRepository {
     // ===== 内存缓存读取 =====
     fun getCachedDesktopGluesReleases(): List<GitHubRelease>? = releasesCache[KEY_DESKTOPGLUES_RELEASES]
     fun getCachedMobileGlRuns(): WorkflowRunPage? = mobileGlRunsCacheValue
+    fun getCachedAllRuns(): WorkflowRunPage? = allRunsCache
     fun getCachedOpenJdkRuns(jdkVersion: Int): WorkflowRunPage? = openJdkRunsCache[jdkVersion]
     fun getCachedArtifacts(owner: String, repo: String, runId: Long): ArtifactPage? =
         artifactCache["${owner}_${repo}_$runId"]
@@ -248,6 +277,8 @@ object UniaballRepository {
     fun loadMobileGlRunsFromDisk(): WorkflowRunPage? {
         return loadFromDisk(KEY_MOBILEGL_RUNS) ?: mobileGlRunsCacheValue
     }
+    fun loadAllRunsFromDisk(): WorkflowRunPage? =
+        loadFromDisk(KEY_OPENJDK_ALL_RUNS) ?: allRunsCache
     fun loadOpenJdkRunsFromDisk(jdkVersion: Int): WorkflowRunPage? {
         return loadFromDisk("$KEY_OPENJDK_RUNS_PREFIX$jdkVersion") ?: openJdkRunsCache[jdkVersion]
     }
