@@ -3,6 +3,7 @@ package com.uniaball.downloader.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import com.uniaball.downloader.data.api.GitHubApi
+import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.model.WorkflowRunPage
@@ -70,22 +71,44 @@ object UniaballRepository {
     private const val KEY_OPENJDK_ALL_RUNS = "cache_openjdk_all_runs"
     private const val KEY_ARTIFACTS_PREFIX = "cache_artifacts_"
     private const val KEY_MIRROR_ENABLED = "pref_mirror_enabled"
+    private const val KEY_MOBILEGL_APK_ONLY = "pref_mobilegl_apk_only"
 
     // gh-proxy 镜像下载开关（默认开启，与原网站一致）
     private val _isMirrorEnabled = MutableStateFlow(true)
     val isMirrorEnabled: StateFlow<Boolean> = _isMirrorEnabled.asStateFlow()
+
+    // MobileGL 仅显示 APK 产物开关（默认开启，过滤掉 trace 等非 APK 产物）
+    private val _isMobileGlApkOnly = MutableStateFlow(true)
+    val isMobileGlApkOnly: StateFlow<Boolean> = _isMobileGlApkOnly.asStateFlow()
 
     fun init(context: Context) {
         appContext = context.applicationContext
         // 从磁盘读取镜像开关初始值（默认 true）
         val prefs = appContext?.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         _isMirrorEnabled.value = prefs?.getBoolean(KEY_MIRROR_ENABLED, true) ?: true
+        _isMobileGlApkOnly.value = prefs?.getBoolean(KEY_MOBILEGL_APK_ONLY, true) ?: true
     }
 
     fun setMirrorEnabled(enabled: Boolean) {
         _isMirrorEnabled.value = enabled
         val prefs = prefs() ?: return
         prefs.edit().putBoolean(KEY_MIRROR_ENABLED, enabled).apply()
+    }
+
+    fun setMobileGlApkOnly(enabled: Boolean) {
+        _isMobileGlApkOnly.value = enabled
+        val prefs = prefs() ?: return
+        prefs.edit().putBoolean(KEY_MOBILEGL_APK_ONLY, enabled).apply()
+    }
+
+    /**
+     * 根据 [isMobileGlApkOnly] 开关过滤 artifacts：
+     *   - 开关开启（默认）：仅保留 name 以 ".apk" 结尾（大小写不敏感）的 artifact
+     *   - 开关关闭：返回原始列表
+     */
+    fun filterApkOnly(artifacts: List<Artifact>): List<Artifact> {
+        if (!_isMobileGlApkOnly.value) return artifacts
+        return artifacts.filter { it.name.endsWith(".apk", ignoreCase = true) }
     }
 
     private fun checkRateLimit() {

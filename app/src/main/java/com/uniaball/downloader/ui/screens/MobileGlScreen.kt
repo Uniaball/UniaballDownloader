@@ -89,8 +89,27 @@ class MobileGlViewModel : ViewModel() {
     private val _snackbar = MutableSharedFlow<String>()
     val snackbar: SharedFlow<String> = _snackbar.asSharedFlow()
 
+    private var allItems: List<MobileGlBuildItem> = emptyList()
+
     init {
         load()
+        viewModelScope.launch {
+            UniaballRepository.isMobileGlApkOnly.collect {
+                if (allItems.isNotEmpty()) {
+                    _uiState.value = applyFilter()
+                }
+            }
+        }
+    }
+
+    private fun applyFilter(): MobileGlUiState {
+        val apkOnly = UniaballRepository.isMobileGlApkOnly.value
+        val filtered = if (apkOnly) {
+            allItems.filter { it.artifact.name.endsWith(".apk", ignoreCase = true) }
+        } else {
+            allItems
+        }
+        return if (filtered.isEmpty()) MobileGlUiState.Empty else MobileGlUiState.Success(filtered)
     }
 
     fun load() {
@@ -109,7 +128,8 @@ class MobileGlViewModel : ViewModel() {
                     ap.artifacts.map { artifact -> MobileGlBuildItem(artifact, run) }
                 }.flatten().sortedByDescending { it.artifact.createdAt }
                 if (cachedItems.isNotEmpty()) {
-                    _uiState.value = MobileGlUiState.Success(cachedItems)
+                    allItems = cachedItems
+                    _uiState.value = applyFilter()
                     hasContent = true
                 } else {
                     _uiState.value = MobileGlUiState.Loading
@@ -160,7 +180,8 @@ class MobileGlViewModel : ViewModel() {
                         _snackbar.emit("未找到可下载的 artifacts")
                     }
                 } else {
-                    _uiState.value = MobileGlUiState.Success(items)
+                    allItems = items
+                    _uiState.value = applyFilter()
                 }
             } catch (e: com.uniaball.downloader.data.repository.RateLimitedException) {
                 if (!hasContent) {

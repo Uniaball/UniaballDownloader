@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ import com.uniaball.downloader.data.repository.UniaballRepository
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val mirrorEnabled by UniaballRepository.isMirrorEnabled.collectAsStateWithLifecycle()
+    val apkOnly by UniaballRepository.isMobileGlApkOnly.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
@@ -83,6 +85,43 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 Switch(
                     checked = mirrorEnabled,
                     onCheckedChange = { UniaballRepository.setMirrorEnabled(it) }
+                )
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.FilterAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "仅显示 APK 产物",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "过滤 MobileGL 工作流中的 trace 等非 APK 产物",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = apkOnly,
+                    onCheckedChange = { UniaballRepository.setMobileGlApkOnly(it) }
                 )
             }
         }
