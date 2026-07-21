@@ -16,16 +16,6 @@ interface GitHubApi {
         @Query("page") page: Int = 1
     ): List<GitHubRelease>
 
-    @GET("repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs")
-    suspend fun listWorkflowRuns(
-        @Path("owner") owner: String,
-        @Path("repo") repo: String,
-        @Path("workflow_id") workflowId: String,
-        @Query("branch") branch: String? = null,
-        @Query("per_page") perPage: Int = 30,
-        @Query("page") page: Int = 1
-    ): WorkflowRunPage
-
     @GET("repos/{owner}/{repo}/actions/runs")
     suspend fun listAllRuns(
         @Path("owner") owner: String,

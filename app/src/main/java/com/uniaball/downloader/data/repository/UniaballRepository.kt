@@ -1,5 +1,7 @@
 package com.uniaball.downloader.data.repository
 
+import android.content.Context
+import android.content.SharedPreferences
 import com.uniaball.downloader.data.api.GitHubApi
 import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.GitHubRelease
@@ -32,11 +34,9 @@ object UniaballRepository {
     // OpenJDK-Android Actions
     const val OPENJDK_OWNER = "Uniaball"
     const val OPENJDK_REPO = "OpenJDK-Android"
-    const val OPENJDK_WORKFLOW_ID = "build.yml"
     // MobileGL Actions
     const val MOBILEGL_OWNER = "MobileGL-Dev"
     const val MOBILEGL_REPO = "MobileGL"
-    const val MOBILEGL_WORKFLOW_ID = "mobilegl-apk.yml"
 
     // 网页版用于过滤 run.name 的关键字
     const val RUN_NAME_MOBILEGL = "MobileGL APK"
@@ -62,7 +62,7 @@ object UniaballRepository {
     private val lastFetchTimestamps = mutableMapOf<String, Long>()
 
     // SharedPreferences 注入
-    private var appContext: android.content.Context? = null
+    private var appContext: Context? = null
     private const val PREF_NAME = "uniaball_cache"
     private const val KEY_DESKTOPGLUES_RELEASES = "cache_desktopglues_releases"
     private const val KEY_MOBILEGL_RUNS = "cache_mobilegl_runs"
@@ -75,10 +75,10 @@ object UniaballRepository {
     private val _isMirrorEnabled = MutableStateFlow(true)
     val isMirrorEnabled: StateFlow<Boolean> = _isMirrorEnabled.asStateFlow()
 
-    fun init(context: android.content.Context) {
+    fun init(context: Context) {
         appContext = context.applicationContext
         // 从磁盘读取镜像开关初始值（默认 true）
-        val prefs = appContext?.getSharedPreferences(PREF_NAME, android.content.Context.MODE_PRIVATE)
+        val prefs = appContext?.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         _isMirrorEnabled.value = prefs?.getBoolean(KEY_MIRROR_ENABLED, true) ?: true
     }
 
@@ -97,6 +97,19 @@ object UniaballRepository {
 
     private fun markRateLimited() {
         rateLimitUntil = System.currentTimeMillis() + RATE_LIMIT_BACKOFF_MS
+    }
+
+    private suspend fun <T> withRateLimit(block: () -> T): T {
+        checkRateLimit()
+        return try {
+            block()
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 403) {
+                markRateLimited()
+                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
+            }
+            throw e
+        }
     }
 
     fun isFresh(key: String, throttleMs: Long = 30_000L): Boolean {
@@ -130,50 +143,23 @@ object UniaballRepository {
     val api: GitHubApi = retrofit.create(GitHubApi::class.java)
 
     // ===== DesktopGlues Releases =====
-    suspend fun listDesktopGluesReleases(): List<GitHubRelease> {
-        checkRateLimit()
-        return try {
-            val result = api.listReleases(DESKTOPGLUES_OWNER, DESKTOPGLUES_REPO)
-            releasesCache[KEY_DESKTOPGLUES_RELEASES] = result
-            markFetched("desktopglues_releases")
-            saveToDisk(KEY_DESKTOPGLUES_RELEASES, result)
-            result
-        } catch (e: retrofit2.HttpException) {
-            if (e.code() == 403) {
-                markRateLimited()
-                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
-            }
-            throw e
-        }
-    }
-
-    // ===== OpenJDK-Android workflow runs by branch (branch name 形如 "jdk-17" / "jdk-21" 等) =====
-    suspend fun listOpenJdkWorkflowRuns(jdkVersion: Int): WorkflowRunPage {
-        val branch = "jdk-$jdkVersion"
-        return api.listWorkflowRuns(OPENJDK_OWNER, OPENJDK_REPO, OPENJDK_WORKFLOW_ID, branch = branch)
+    suspend fun listDesktopGluesReleases(): List<GitHubRelease> = withRateLimit {
+        val result = api.listReleases(DESKTOPGLUES_OWNER, DESKTOPGLUES_REPO)
+        releasesCache[KEY_DESKTOPGLUES_RELEASES] = result
+        markFetched("desktopglues_releases")
+        saveToDisk(KEY_DESKTOPGLUES_RELEASES, result)
+        result
     }
 
     suspend fun listArtifactsForRun(owner: String, repo: String, runId: Long): ArtifactPage {
-        checkRateLimit()
         val cacheKey = "${owner}_${repo}_$runId"
-        return try {
+        return withRateLimit {
             val result = api.listArtifacts(owner, repo, runId)
             artifactCache[cacheKey] = result
             markFetched("artifacts_$cacheKey")
             saveToDisk("$KEY_ARTIFACTS_PREFIX${cacheKey}", result)
             result
-        } catch (e: retrofit2.HttpException) {
-            if (e.code() == 403) {
-                markRateLimited()
-                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
-            }
-            throw e
         }
-    }
-
-    // ===== MobileGL workflow runs =====
-    suspend fun listMobileGlWorkflowRuns(): WorkflowRunPage {
-        return api.listWorkflowRuns(MOBILEGL_OWNER, MOBILEGL_REPO, MOBILEGL_WORKFLOW_ID)
     }
 
     suspend fun listAllRuns(owner: String, repo: String): WorkflowRunPage =
@@ -190,19 +176,12 @@ object UniaballRepository {
         if (allRunsCache != null && isFresh("openjdk_all_runs")) {
             return allRunsCache!!
         }
-        checkRateLimit()
-        return try {
+        return withRateLimit {
             val result = api.listAllRuns(owner, repo)
             allRunsCache = result
             markFetched("openjdk_all_runs")
             saveToDisk(KEY_OPENJDK_ALL_RUNS, result)
             result
-        } catch (e: retrofit2.HttpException) {
-            if (e.code() == 403) {
-                markRateLimited()
-                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
-            }
-            throw e
         }
     }
 
@@ -211,26 +190,16 @@ object UniaballRepository {
      * 按 run.name 模糊匹配（小写后包含 jdk{version} / openjdk{version} / java{version} 任一）。
      * 与网页版 openjdk.html 的逻辑一致。
      */
-    suspend fun listOpenJdkRuns(jdkVersion: Int): WorkflowRunPage {
-        checkRateLimit()
-        return try {
-            val page = listAllRunsCached(OPENJDK_OWNER, OPENJDK_REPO)
-            val versionStr = jdkVersion.toString()
-            val lowerKeywords = listOf("jdk$versionStr", "openjdk$versionStr", "java$versionStr")
-            val filtered = page.workflowRuns.filter { run ->
-                val name = (run.name ?: "").lowercase()
-                lowerKeywords.any { name.contains(it) }
-            }
-            val result = page.copy(workflowRuns = filtered)
-            openJdkRunsCache[jdkVersion] = result
-            result
-        } catch (e: retrofit2.HttpException) {
-            if (e.code() == 403) {
-                markRateLimited()
-                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
-            }
-            throw e
+    suspend fun listOpenJdkRuns(jdkVersion: Int): WorkflowRunPage = withRateLimit {
+        val page = listAllRunsCached(OPENJDK_OWNER, OPENJDK_REPO)
+        val lowerKeywords = jdkKeywords(jdkVersion)
+        val filtered = page.workflowRuns.filter { run ->
+            val name = (run.name ?: "").lowercase()
+            lowerKeywords.any { name.contains(it) }
         }
+        val result = page.copy(workflowRuns = filtered)
+        openJdkRunsCache[jdkVersion] = result
+        result
     }
 
     /**
@@ -238,25 +207,21 @@ object UniaballRepository {
      * 按 run.name equals "MobileGL APK"（忽略大小写）过滤。
      * 与网页版 mobilegl-actions.html 的逻辑一致。
      */
-    suspend fun listMobileGlRuns(): WorkflowRunPage {
-        checkRateLimit()
-        return try {
-            val page = listAllRuns(MOBILEGL_OWNER, MOBILEGL_REPO)
-            val filtered = page.workflowRuns.filter { run ->
-                (run.name ?: "").equals(RUN_NAME_MOBILEGL, ignoreCase = true)
-            }
-            val result = page.copy(workflowRuns = filtered)
-            mobileGlRunsCacheValue = result
-            markFetched("mobilegl_runs")
-            saveToDisk(KEY_MOBILEGL_RUNS, result)
-            result
-        } catch (e: retrofit2.HttpException) {
-            if (e.code() == 403) {
-                markRateLimited()
-                throw RateLimitedException("GitHub API 速率限制，请更换网络后重试")
-            }
-            throw e
+    suspend fun listMobileGlRuns(): WorkflowRunPage = withRateLimit {
+        val page = listAllRuns(MOBILEGL_OWNER, MOBILEGL_REPO)
+        val filtered = page.workflowRuns.filter { run ->
+            (run.name ?: "").equals(RUN_NAME_MOBILEGL, ignoreCase = true)
         }
+        val result = page.copy(workflowRuns = filtered)
+        mobileGlRunsCacheValue = result
+        markFetched("mobilegl_runs")
+        saveToDisk(KEY_MOBILEGL_RUNS, result)
+        result
+    }
+
+    internal fun jdkKeywords(version: Int): List<String> {
+        val v = version.toString()
+        return listOf("jdk$v", "openjdk$v", "java$v")
     }
 
     /**
@@ -307,8 +272,8 @@ object UniaballRepository {
     }
 
     // ===== 内部 SharedPreferences 读写 =====
-    private fun prefs(): android.content.SharedPreferences? =
-        appContext?.getSharedPreferences(PREF_NAME, android.content.Context.MODE_PRIVATE)
+    private fun prefs(): SharedPreferences? =
+        appContext?.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
     private inline fun <reified T> loadFromDisk(key: String): T? {
         val p = prefs() ?: return null

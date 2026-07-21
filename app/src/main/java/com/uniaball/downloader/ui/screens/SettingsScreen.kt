@@ -22,20 +22,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.uniaball.downloader.BuildConfig
 import com.uniaball.downloader.data.repository.UniaballRepository
 
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val mirrorEnabled by UniaballRepository.isMirrorEnabled.collectAsState()
+    val mirrorEnabled by UniaballRepository.isMirrorEnabled.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
