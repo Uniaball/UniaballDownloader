@@ -3,12 +3,13 @@ package com.uniaball.downloader.util
 import android.content.Context
 import android.content.Intent
 import android.os.Environment
+import android.webkit.MimeTypeMap
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,7 +60,10 @@ object InAppDownloadManager {
     private val speedSamples = mutableListOf<Pair<Long, Long>>()
 
     fun init(context: Context) {
-        downloadDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "UniaballDownloader")
+        downloadDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "UniaballDownloader"
+        )
         downloadDir?.mkdirs()
     }
 
@@ -164,51 +168,40 @@ object InAppDownloadManager {
         _downloadState.value = DownloadState()
     }
 
-    fun openFile(context: Context) {
+    fun openDownloadedFile(context: Context) {
         val state = _downloadState.value
         if (state.status != DownloadStatus.COMPLETED || state.filePath.isBlank()) return
         val file = File(state.filePath)
-        if (!file.exists()) return
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val mimeType = state.fileName.let { name ->
-            when {
-                name.endsWith(".apk", ignoreCase = true) -> "application/vnd.android.package-archive"
-                name.endsWith(".zip", ignoreCase = true) -> "application/zip"
-                name.endsWith(".tar.gz", ignoreCase = true) || name.endsWith(".tgz", ignoreCase = true) -> "application/gzip"
-                name.endsWith(".jar", ignoreCase = true) -> "application/java-archive"
-                else -> "*/*"
-            }
+        if (!file.exists()) {
+            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+            return
         }
+
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val mimeType = getMimeType(state.fileName)
+
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mimeType)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+
         runCatching {
-            context.startActivity(intent)
+            context.startActivity(Intent.createChooser(intent, "查看文件"))
+        }.onFailure {
+            Toast.makeText(context, "无法打开文件，文件路径：${file.absolutePath}", Toast.LENGTH_LONG).show()
         }
     }
 
-    fun openFileLocation(context: Context) {
-        val state = _downloadState.value
-        if (state.status != DownloadStatus.COMPLETED || state.filePath.isBlank()) return
-        val file = File(state.filePath)
-        if (!file.exists()) return
-        val parentUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(parentUri, "vnd.android.document/directory")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    private fun getMimeType(fileName: String): String {
+        val extension = MimeTypeMap.getFileExtensionFromUrl(fileName)
+        if (extension.isNotBlank()) {
+            MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)?.let { return it }
         }
-        runCatching {
-            context.startActivity(intent)
-        }.onFailure {
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, "文件已下载到: ${file.absolutePath}")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            runCatching { context.startActivity(Intent.createChooser(shareIntent, "文件位置")) }
+        return when {
+            fileName.endsWith(".apk", ignoreCase = true) -> "application/vnd.android.package-archive"
+            fileName.endsWith(".tar.gz", ignoreCase = true) || fileName.endsWith(".tgz", ignoreCase = true) -> "application/gzip"
+            else -> "*/*"
         }
     }
 

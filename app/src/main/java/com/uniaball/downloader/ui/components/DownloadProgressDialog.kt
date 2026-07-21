@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -35,7 +34,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -274,26 +272,14 @@ private fun CompletedContent(state: DownloadState, onDismiss: () -> Unit) {
     ) {
         Button(
             onClick = {
-                InAppDownloadManager.openFile(context)
-                onDismiss()
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Filled.OpenInNew, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("用其他应用打开")
-        }
-
-        OutlinedButton(
-            onClick = {
-                InAppDownloadManager.openFileLocation(context)
+                InAppDownloadManager.openDownloadedFile(context)
                 onDismiss()
             },
             modifier = Modifier.fillMaxWidth()
         ) {
             Icon(Icons.Filled.FolderOpen, null, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("查看文件位置")
+            Text("查看文件所在位置")
         }
     }
 }
