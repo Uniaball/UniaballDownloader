@@ -99,7 +99,7 @@ object UniaballRepository {
         rateLimitUntil = System.currentTimeMillis() + RATE_LIMIT_BACKOFF_MS
     }
 
-    private suspend fun <T> withRateLimit(block: () -> T): T {
+    private suspend fun <T> withRateLimit(block: suspend () -> T): T {
         checkRateLimit()
         return try {
             block()
