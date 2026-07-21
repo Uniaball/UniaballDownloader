@@ -7,6 +7,7 @@ import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.model.WorkflowRunPage
+import com.uniaball.downloader.util.LogUtil
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +53,7 @@ object UniaballRepository {
 
     // ===== 缓存清理 =====
     fun clearCache() {
+        LogUtil.i("Cache", "清除全部 API 缓存")
         releasesCache.clear()
         mobileGlRunsCacheValue = null
         allRunsCache = null
@@ -121,12 +123,14 @@ object UniaballRepository {
     }
 
     fun setMirrorEnabled(enabled: Boolean) {
+        LogUtil.i("Settings", "镜像下载: ${if (enabled) "开启" else "关闭"}")
         _isMirrorEnabled.value = enabled
         val prefs = prefs() ?: return
         prefs.edit().putBoolean(KEY_MIRROR_ENABLED, enabled).apply()
     }
 
     fun setMobileGlApkOnly(enabled: Boolean) {
+        LogUtil.i("Settings", "APK 过滤: ${if (enabled) "开启" else "关闭"}")
         _isMobileGlApkOnly.value = enabled
         val prefs = prefs() ?: return
         prefs.edit().putBoolean(KEY_MOBILEGL_APK_ONLY, enabled).apply()
@@ -150,6 +154,7 @@ object UniaballRepository {
     }
 
     private fun markRateLimited() {
+        LogUtil.w("API", "触发 GitHub API 速率限制退避 (${RATE_LIMIT_BACKOFF_MS / 1000}s)")
         rateLimitUntil = System.currentTimeMillis() + RATE_LIMIT_BACKOFF_MS
     }
 

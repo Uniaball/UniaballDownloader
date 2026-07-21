@@ -70,6 +70,7 @@ object InAppDownloadManager {
 
     fun startDownload(url: String, fileName: String) {
         cancelDownload()
+        LogUtil.i("Download", "开始下载: $fileName")
         _downloadState.value = DownloadState(
             status = DownloadStatus.DOWNLOADING,
             url = url,
@@ -89,6 +90,7 @@ object InAppDownloadManager {
                 response = client.newCall(request).execute()
 
                 if (!response.isSuccessful) {
+                    LogUtil.e("Download", "HTTP ${response.code}: ${response.message}")
                     _downloadState.value = _downloadState.value.copy(
                         status = DownloadStatus.FAILED,
                         error = "HTTP ${response.code}: ${response.message}"
@@ -148,9 +150,11 @@ object InAppDownloadManager {
                     downloadedBytes = totalRead,
                     speedBytesPerSec = 0L
                 )
+                LogUtil.i("Download", "下载完成: $fileName (${totalRead} bytes)")
                 UniaballRepository.clearCache()
             } catch (e: Exception) {
                 if (isActive) {
+                    LogUtil.e("Download", "下载失败: $fileName", e)
                     _downloadState.value = _downloadState.value.copy(
                         status = DownloadStatus.FAILED,
                         error = e.message ?: "下载失败"

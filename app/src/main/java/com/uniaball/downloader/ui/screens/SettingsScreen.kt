@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FilterAlt
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.uniaball.downloader.BuildConfig
 import com.uniaball.downloader.data.repository.UniaballRepository
+import com.uniaball.downloader.util.LogUtil
 import com.uniaball.downloader.util.formatSize
 
 @Composable
@@ -262,6 +264,59 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     }
                 }
             )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ===== 日志与调试 =====
+        Text(
+            text = "日志与调试",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Share,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "导出运行日志",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "导出应用 logcat 日志用于排查问题",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Button(
+                    onClick = {
+                        runCatching {
+                            LogUtil.shareLogs(context)
+                        }.onFailure {
+                            Toast.makeText(context, "导出日志失败: ${it.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("导出")
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
