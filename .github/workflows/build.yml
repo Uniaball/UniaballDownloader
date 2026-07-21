@@ -10,6 +10,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # 跟随仓库变量 debug: 1=Debug, 0=Release; 未定义时默认 '1'
+      DEBUG: ${{ vars.debug || '1' }}
 
     steps:
       - name: Checkout
@@ -29,7 +32,7 @@ jobs:
         continue-on-error: true
 
       - name: Decode Keystore
-        if: ${{ env.KEYSTORE_BASE64 != '' }}
+        if: ${{ env.DEBUG == '0' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
@@ -37,6 +40,7 @@ jobs:
           echo "KEYSTORE_PATH=app.jks" >> $GITHUB_ENV
 
       - name: Build Debug APK
+        if: ${{ env.DEBUG == '1' }}
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -44,6 +48,7 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Build Release APK
+        if: ${{ env.DEBUG == '0' }}
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -51,6 +56,7 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Upload Debug APK
+        if: ${{ env.DEBUG == '1' }}
         uses: actions/upload-artifact@v7
         with:
           name: uniaball-downloader-debug
@@ -59,6 +65,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Release APK
+        if: ${{ env.DEBUG == '0' }}
         uses: actions/upload-artifact@v7
         with:
           name: uniaball-downloader-release
