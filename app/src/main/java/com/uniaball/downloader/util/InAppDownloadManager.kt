@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.uniaball.downloader.data.repository.UniaballRepository
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -81,6 +82,9 @@ object InAppDownloadManager {
             try {
                 val dir = downloadDir ?: throw IllegalStateException("Download directory not initialized")
                 val file = File(dir, sanitizeFileName(fileName))
+                if (file.exists()) {
+                    file.delete()
+                }
                 val request = Request.Builder().url(url).build()
                 response = client.newCall(request).execute()
 
@@ -144,6 +148,7 @@ object InAppDownloadManager {
                     downloadedBytes = totalRead,
                     speedBytesPerSec = 0L
                 )
+                UniaballRepository.clearCache()
             } catch (e: Exception) {
                 if (isActive) {
                     _downloadState.value = _downloadState.value.copy(
@@ -217,6 +222,12 @@ object InAppDownloadManager {
     }
 
     private fun sanitizeFileName(name: String): String {
-        return name.replace(Regex("""[\\/:*?"<>|]"""), "_")
+        return name
+            .replace("\n", "")
+            .replace("\r", "")
+            .replace("\t", " ")
+            .replace(Regex("""[\\/:*?"<>|]"""), "_")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
     }
 }

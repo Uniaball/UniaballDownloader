@@ -50,6 +50,37 @@ object UniaballRepository {
     @Volatile
     private var rateLimitUntil: Long = 0L
 
+    // ===== 缓存清理 =====
+    fun clearCache() {
+        releasesCache.clear()
+        mobileGlRunsCacheValue = null
+        allRunsCache = null
+        openJdkRunsCache.clear()
+        artifactCache.clear()
+        lastFetchTimestamps.clear()
+        rateLimitUntil = 0L
+
+        val p = prefs()?.edit() ?: return
+        val allKeys = prefs()?.all?.keys ?: emptySet()
+        for (key in allKeys) {
+            if (key.startsWith("cache_")) {
+                p.remove(key)
+            }
+        }
+        p.apply()
+    }
+
+    fun getCacheSize(): Long {
+        val p = prefs() ?: return 0L
+        var total = 0L
+        for ((key, value) in p.all) {
+            if (key.startsWith("cache_") && value is String) {
+                total += value.toByteArray(Charsets.UTF_8).size
+            }
+        }
+        return total
+    }
+
     // 内存缓存
     private val releasesCache = mutableMapOf<String, List<GitHubRelease>>()
     @Volatile
