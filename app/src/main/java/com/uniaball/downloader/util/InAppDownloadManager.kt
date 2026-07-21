@@ -109,8 +109,9 @@ object InAppDownloadManager {
                     val buffer = ByteArray(8192)
                     var lastReportTime = System.currentTimeMillis()
                     var bytesRead: Int
-
-                    while (isActive && source.read(buffer).also { bytesRead = it } != -1) {
+                    while (isActive) {
+                        bytesRead = source.read(buffer)
+                        if (bytesRead == -1) break
                         output.write(buffer, 0, bytesRead)
                         totalRead += bytesRead
 
