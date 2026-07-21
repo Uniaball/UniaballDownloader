@@ -50,8 +50,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.uniaball.downloader.data.model.GitHubAsset
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.repository.UniaballRepository
+import com.uniaball.downloader.ui.components.DownloadProgressDialog
 import com.uniaball.downloader.ui.screenTransitionSpec
+import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
+import com.uniaball.downloader.util.InAppDownloadManager
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
 import dev.jeziellago.compose.markdowntext.MarkdownText
@@ -134,6 +137,7 @@ fun DesktopGluesScreen(modifier: Modifier = Modifier) {
     val viewModel: DesktopGluesViewModel = viewModel { DesktopGluesViewModel() }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val downloadState by InAppDownloadManager.downloadState.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.snackbar.collect { msg ->
@@ -162,6 +166,13 @@ fun DesktopGluesScreen(modifier: Modifier = Modifier) {
                 is DesktopGluesUiState.Success -> SuccessView(target.releases, Modifier.fillMaxSize())
             }
         }
+    }
+
+    if (downloadState.status != DownloadStatus.IDLE) {
+        DownloadProgressDialog(
+            state = downloadState,
+            onDismiss = { InAppDownloadManager.resetState() }
+        )
     }
 }
 
@@ -282,7 +293,6 @@ private fun ReleaseCard(release: GitHubRelease, modifier: Modifier = Modifier) {
 
 @Composable
 private fun AssetRow(asset: GitHubAsset) {
-    val context = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -304,7 +314,9 @@ private fun AssetRow(asset: GitHubAsset) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        FilledTonalButton(onClick = { DownloadUtil.openDownload(context, asset.browserDownloadUrl) }) {
+        FilledTonalButton(onClick = {
+            DownloadUtil.startInAppDownload(asset.browserDownloadUrl, asset.name)
+        }) {
             Icon(Icons.Filled.Download, null, Modifier.size(18.dp))
             Spacer(Modifier.size(6.dp))
             Text("下载")

@@ -36,7 +36,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -48,8 +47,11 @@ import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.model.WorkflowRunPage
 import com.uniaball.downloader.data.repository.UniaballRepository
+import com.uniaball.downloader.ui.components.DownloadProgressDialog
 import com.uniaball.downloader.ui.screenTransitionSpec
+import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
+import com.uniaball.downloader.util.InAppDownloadManager
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
 import kotlinx.coroutines.CancellationException
@@ -284,9 +286,9 @@ fun OpenJdkScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val selectedVersion by viewModel.selectedVersion.collectAsStateWithLifecycle()
     val isFetching by viewModel.isFetching.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val downloadState by InAppDownloadManager.downloadState.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.snackbar.collect { msg ->
@@ -363,7 +365,7 @@ fun OpenJdkScreen(
                     OpenJdkUiState.Loading -> LoadingContent()
                     is OpenJdkUiState.Success -> BuildsList(
                         items = state.items,
-                        onDownload = { url -> DownloadUtil.openDownload(context, url) }
+                        onDownload = { url, name -> DownloadUtil.startInAppDownload(url, name) }
                     )
                     is OpenJdkUiState.Error -> ErrorContent(
                         message = state.message,
@@ -373,6 +375,13 @@ fun OpenJdkScreen(
                 }
             }
         }
+    }
+
+    if (downloadState.status != DownloadStatus.IDLE) {
+        DownloadProgressDialog(
+            state = downloadState,
+            onDismiss = { InAppDownloadManager.resetState() }
+        )
     }
 }
 
@@ -437,7 +446,7 @@ private fun ErrorContent(message: String, onRetry: () -> Unit) {
 @Composable
 private fun BuildsList(
     items: List<OpenJdkBuildItem>,
-    onDownload: (String) -> Unit
+    onDownload: (String, String) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -453,7 +462,7 @@ private fun BuildsList(
 @Composable
 private fun BuildCard(
     item: OpenJdkBuildItem,
-    onDownload: (String) -> Unit,
+    onDownload: (String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val artifact = item.artifact
@@ -467,7 +476,7 @@ private fun BuildCard(
         )
     }
     Card(
-        onClick = { onDownload(downloadUrl) },
+        onClick = { onDownload(downloadUrl, "${artifact.name}.zip") },
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
@@ -504,7 +513,7 @@ private fun BuildCard(
                 }
             }
             FilledTonalButton(
-                onClick = { onDownload(downloadUrl) },
+                onClick = { onDownload(downloadUrl, "${artifact.name}.zip") },
                 enabled = !artifact.expired
             ) {
                 Text("下载")

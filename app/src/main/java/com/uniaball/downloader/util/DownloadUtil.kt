@@ -26,4 +26,14 @@ object DownloadUtil {
             Toast.makeText(context, "无法打开下载链接", Toast.LENGTH_SHORT).show()
         }
     }
+
+    /**
+     * 应用内下载：不跳转浏览器，直接使用 OkHttp 下载到本地，
+     * 通过 InAppDownloadManager 管理进度、速率和状态。
+     */
+    fun startInAppDownload(rawUrl: String, fileName: String) {
+        if (rawUrl.isBlank()) return
+        val mirrored = UniaballRepository.mirror(rawUrl)
+        InAppDownloadManager.startDownload(mirrored, fileName)
+    }
 }

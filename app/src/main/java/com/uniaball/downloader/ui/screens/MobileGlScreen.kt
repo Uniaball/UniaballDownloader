@@ -38,7 +38,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,8 +48,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.repository.UniaballRepository
+import com.uniaball.downloader.ui.components.DownloadProgressDialog
 import com.uniaball.downloader.ui.screenTransitionSpec
+import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
+import com.uniaball.downloader.util.InAppDownloadManager
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
 import kotlinx.coroutines.async
@@ -213,6 +215,7 @@ fun MobileGlScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val downloadState by InAppDownloadManager.downloadState.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.snackbar.collect { msg ->
@@ -332,11 +335,17 @@ fun MobileGlScreen(
             }
         }
     }
+
+    if (downloadState.status != DownloadStatus.IDLE) {
+        DownloadProgressDialog(
+            state = downloadState,
+            onDismiss = { InAppDownloadManager.resetState() }
+        )
+    }
 }
 
 @Composable
 private fun MobileGlBuildCard(item: MobileGlBuildItem, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
     val artifact = item.artifact
     val run = item.run
     Card(modifier = modifier.fillMaxWidth()) {
@@ -385,7 +394,7 @@ private fun MobileGlBuildCard(item: MobileGlBuildItem, modifier: Modifier = Modi
                 }
                 FilledTonalButton(
                     onClick = {
-                        DownloadUtil.openDownload(context, artifact.archiveDownloadUrl)
+                        DownloadUtil.startInAppDownload(artifact.archiveDownloadUrl, artifact.name)
                     },
                     enabled = !artifact.expired
                 ) {
