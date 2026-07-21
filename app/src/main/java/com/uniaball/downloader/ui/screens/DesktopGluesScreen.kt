@@ -1,12 +1,6 @@
 package com.uniaball.downloader.ui.screens
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.uniaball.downloader.data.model.GitHubAsset
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.repository.UniaballRepository
+import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadUtil
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
@@ -154,15 +149,7 @@ fun DesktopGluesScreen(modifier: Modifier = Modifier) {
         AnimatedContent(
             targetState = state,
             modifier = Modifier.fillMaxSize().padding(padding),
-            transitionSpec = {
-                fadeIn(animationSpec = tween(220)) + slideInVertically(
-                    animationSpec = tween(220),
-                    initialOffsetY = { it / 8 }
-                ) togetherWith fadeOut(animationSpec = tween(180)) + slideOutVertically(
-                    animationSpec = tween(180),
-                    targetOffsetY = { -it / 8 }
-                )
-            },
+            transitionSpec = { screenTransitionSpec() },
             label = "desktopglues-state"
         ) { target ->
             when (target) {

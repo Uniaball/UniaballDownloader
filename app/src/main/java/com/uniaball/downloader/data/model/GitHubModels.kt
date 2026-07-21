@@ -115,20 +115,3 @@ data class ArtifactPage(
     val totalCount: Long = 0,
     val artifacts: List<Artifact> = emptyList()
 )
-
-@Serializable
-data class Workflow(
-    val id: Long,
-    val name: String = "",
-    val path: String = "",
-    val state: String = "",
-    @SerialName("html_url")
-    val htmlUrl: String = ""
-)
-
-@Serializable
-data class WorkflowPage(
-    @SerialName("total_count")
-    val totalCount: Long = 0,
-    val workflows: List<Workflow> = emptyList()
-)

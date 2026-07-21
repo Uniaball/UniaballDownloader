@@ -1,12 +1,6 @@
 package com.uniaball.downloader.ui.screens
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,8 +44,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.uniaball.downloader.data.model.Artifact
+import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.WorkflowRun
+import com.uniaball.downloader.data.model.WorkflowRunPage
 import com.uniaball.downloader.data.repository.UniaballRepository
+import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadUtil
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
@@ -127,71 +124,71 @@ class OpenJdkViewModel : ViewModel() {
      * 改为 suspend：所有磁盘 JSON 反序列化在协程内执行，避免主线程 ANR。
      */
     private suspend fun lookupCachedItems(version: Int): List<OpenJdkBuildItem> {
-        val versionStr = version.toString()
-        val lowerKeywords = listOf("jdk$versionStr", "openjdk$versionStr", "java$versionStr")
+        val owner = UniaballRepository.OPENJDK_OWNER
+        val repo = UniaballRepository.OPENJDK_REPO
 
-        // 1. allRuns 内存缓存
-        val memAll = UniaballRepository.getCachedAllRuns()
-        if (memAll != null && memAll.workflowRuns.isNotEmpty()) {
-            val filtered = memAll.workflowRuns.filter { run ->
-                val name = (run.name ?: "").lowercase()
-                lowerKeywords.any { name.contains(it) }
-            }
-            val items = filtered.take(5).mapNotNull { run ->
-                val ap = UniaballRepository.getCachedArtifacts(
-                    UniaballRepository.OPENJDK_OWNER,
-                    UniaballRepository.OPENJDK_REPO,
-                    run.id
-                ) ?: return@mapNotNull null
-                ap.artifacts.map { OpenJdkBuildItem(it, run) }
-            }.flatten()
-            if (items.isNotEmpty()) return items
-        }
+        // 1. allRuns 内存缓存（按版本关键字过滤）
+        buildItemsFromPage(
+            page = UniaballRepository.getCachedAllRuns(),
+            applyVersionFilter = true,
+            version = version,
+            artifactLookup = { runId -> UniaballRepository.getCachedArtifacts(owner, repo, runId) }
+        ).takeIf { it.isNotEmpty() }?.let { return it }
 
-        // 2. allRuns 磁盘缓存
-        val diskAll = UniaballRepository.loadAllRunsFromDisk()
-        if (diskAll != null && diskAll.workflowRuns.isNotEmpty()) {
-            val filtered = diskAll.workflowRuns.filter { run ->
-                val name = (run.name ?: "").lowercase()
-                lowerKeywords.any { name.contains(it) }
-            }
-            val items = filtered.take(5).mapNotNull { run ->
-                val ap = UniaballRepository.loadArtifactsFromDisk(
-                    UniaballRepository.OPENJDK_OWNER,
-                    UniaballRepository.OPENJDK_REPO,
-                    run.id
-                ) ?: return@mapNotNull null
-                ap.artifacts.map { OpenJdkBuildItem(it, run) }
-            }.flatten()
-            if (items.isNotEmpty()) return items
-        }
+        // 2. allRuns 磁盘缓存（按版本关键字过滤）
+        buildItemsFromPage(
+            page = UniaballRepository.loadAllRunsFromDisk(),
+            applyVersionFilter = true,
+            version = version,
+            artifactLookup = { runId -> UniaballRepository.loadArtifactsFromDisk(owner, repo, runId) }
+        ).takeIf { it.isNotEmpty() }?.let { return it }
 
-        // 3. 兼容回退：按 version 单独的内存/磁盘缓存（旧数据兼容）
-        val memRuns = UniaballRepository.getCachedOpenJdkRuns(version)
-        if (memRuns != null && memRuns.workflowRuns.isNotEmpty()) {
-            val items = memRuns.workflowRuns.take(5).mapNotNull { run ->
-                val ap = UniaballRepository.getCachedArtifacts(
-                    UniaballRepository.OPENJDK_OWNER,
-                    UniaballRepository.OPENJDK_REPO,
-                    run.id
-                ) ?: return@mapNotNull null
-                ap.artifacts.map { OpenJdkBuildItem(it, run) }
-            }.flatten()
-            if (items.isNotEmpty()) return items
-        }
-        val diskRuns = UniaballRepository.loadOpenJdkRunsFromDisk(version)
-        if (diskRuns != null && diskRuns.workflowRuns.isNotEmpty()) {
-            val items = diskRuns.workflowRuns.take(5).mapNotNull { run ->
-                val ap = UniaballRepository.loadArtifactsFromDisk(
-                    UniaballRepository.OPENJDK_OWNER,
-                    UniaballRepository.OPENJDK_REPO,
-                    run.id
-                ) ?: return@mapNotNull null
-                ap.artifacts.map { OpenJdkBuildItem(it, run) }
-            }.flatten()
-            if (items.isNotEmpty()) return items
-        }
+        // 3. 兼容回退：按 version 单独的内存缓存（不过滤，写入时已过滤）
+        buildItemsFromPage(
+            page = UniaballRepository.getCachedOpenJdkRuns(version),
+            applyVersionFilter = false,
+            version = version,
+            artifactLookup = { runId -> UniaballRepository.getCachedArtifacts(owner, repo, runId) }
+        ).takeIf { it.isNotEmpty() }?.let { return it }
+
+        // 4. 兼容回退：按 version 单独的磁盘缓存（不过滤，写入时已过滤）
+        buildItemsFromPage(
+            page = UniaballRepository.loadOpenJdkRunsFromDisk(version),
+            applyVersionFilter = false,
+            version = version,
+            artifactLookup = { runId -> UniaballRepository.loadArtifactsFromDisk(owner, repo, runId) }
+        ).takeIf { it.isNotEmpty() }?.let { return it }
+
         return emptyList()
+    }
+
+    /**
+     * 单一缓存源的统一处理：可选按版本关键字过滤 → take(5) → 查 artifacts → 拼装 OpenJdkBuildItem。
+     * - [applyVersionFilter] = true：按 jdkKeywords(version) 过滤 runs（allRuns 缓存分支用）
+     * - [applyVersionFilter] = false：直接取 runs（version 缓存分支用，数据写入时已过滤）
+     * - [artifactLookup]：内存缓存用 getCachedArtifacts，磁盘缓存用 loadArtifactsFromDisk
+     * 返回空列表表示该缓存源无可用数据，调用方据此尝试下一源。
+     */
+    private suspend fun buildItemsFromPage(
+        page: WorkflowRunPage?,
+        applyVersionFilter: Boolean,
+        version: Int,
+        artifactLookup: suspend (Long) -> ArtifactPage?
+    ): List<OpenJdkBuildItem> {
+        if (page == null || page.workflowRuns.isEmpty()) return emptyList()
+        val runs = if (applyVersionFilter) {
+            val keywords = UniaballRepository.jdkKeywords(version)
+            page.workflowRuns.filter { run ->
+                val name = (run.name ?: "").lowercase()
+                keywords.any { name.contains(it) }
+            }
+        } else {
+            page.workflowRuns
+        }
+        return runs.take(5).mapNotNull { run ->
+            val ap = artifactLookup(run.id) ?: return@mapNotNull null
+            ap.artifacts.map { OpenJdkBuildItem(it, run) }
+        }.flatten()
     }
 
     fun fetchBuilds() {
@@ -358,15 +355,7 @@ fun OpenJdkScreen(
 
             AnimatedContent(
                 targetState = uiState,
-                transitionSpec = {
-                    fadeIn(animationSpec = tween(220)) + slideInVertically(
-                        animationSpec = tween(220),
-                        initialOffsetY = { it / 8 }
-                    ) togetherWith fadeOut(animationSpec = tween(180)) + slideOutVertically(
-                        animationSpec = tween(180),
-                        targetOffsetY = { -it / 8 }
-                    )
-                },
+                transitionSpec = { screenTransitionSpec() },
                 label = "openjdk-state"
             ) { state ->
                 when (state) {

@@ -1,12 +1,6 @@
 package com.uniaball.downloader.ui.screens
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,7 +33,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -52,9 +45,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.repository.UniaballRepository
+import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadUtil
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
@@ -194,8 +189,8 @@ fun MobileGlScreen(
     modifier: Modifier = Modifier,
     viewModel: MobileGlViewModel = viewModel()
 ) {
-    val state by viewModel.uiState.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -251,15 +246,7 @@ fun MobileGlScreen(
                 AnimatedContent(
                     targetState = state,
                     modifier = Modifier.fillMaxSize(),
-                    transitionSpec = {
-                        fadeIn(animationSpec = tween(220)) + slideInVertically(
-                            animationSpec = tween(220),
-                            initialOffsetY = { it / 8 }
-                        ) togetherWith fadeOut(animationSpec = tween(180)) + slideOutVertically(
-                            animationSpec = tween(180),
-                            targetOffsetY = { -it / 8 }
-                        )
-                    },
+                    transitionSpec = { screenTransitionSpec() },
                     label = "mobilegl-state"
                 ) { target ->
                     when (target) {
