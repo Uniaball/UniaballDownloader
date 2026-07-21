@@ -6,6 +6,18 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Build debug (1) or release (0)'
+        required: false
+        default: '0'
+        type: choice
+        options:
+          - '0'
+          - '1'
+
+env:
+  DEBUG: ${{ github.event.inputs.debug || '1' }}
 
 jobs:
   build:
@@ -37,6 +49,7 @@ jobs:
           echo "KEYSTORE_PATH=app.jks" >> $GITHUB_ENV
 
       - name: Build Debug APK
+        if: env.DEBUG == '1'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -44,6 +57,7 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Build Release APK
+        if: env.DEBUG == '0'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -51,6 +65,7 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Upload Debug APK
+        if: env.DEBUG == '1'
         uses: actions/upload-artifact@v7
         with:
           name: uniaball-downloader-debug
@@ -59,6 +74,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Release APK
+        if: env.DEBUG == '0'
         uses: actions/upload-artifact@v7
         with:
           name: uniaball-downloader-release
