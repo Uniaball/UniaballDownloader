@@ -7,5 +7,3 @@ build
 # Ignore Kotlin plugin data
 .kotlin
 
-# Ignore TRAE agent workspace
-.trae
