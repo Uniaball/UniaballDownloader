@@ -50,7 +50,6 @@ import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.ui.components.DownloadProgressDialog
-import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
@@ -108,7 +107,9 @@ class MobileGlViewModel : ViewModel() {
 
     private fun applyFilter(): MobileGlUiState {
         val filteredArtifacts = UniaballRepository.filterApkOnly(allItems.map { it.artifact })
-        val filtered = allItems.filter { it.artifact in filteredArtifacts }
+        // 转为 Set 加速 O(1) 查找，避免 O(n*m) 遍历
+        val filteredSet = filteredArtifacts.toSet()
+        val filtered = allItems.filter { it.artifact in filteredSet }
         return if (filtered.isEmpty()) MobileGlUiState.Empty else MobileGlUiState.Success(filtered)
     }
 
@@ -324,7 +325,7 @@ fun MobileGlScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 itemsIndexed(items = target.items, key = { _, it -> it.artifact.id }, contentType = { _, _ -> "mobilegl_build" }) { index, item ->
-                                    MobileGlBuildCard(item, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
+                                    MobileGlBuildCard(item, modifier = Modifier.animateItem())
                                 }
                             }
                         }

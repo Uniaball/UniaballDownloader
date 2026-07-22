@@ -52,7 +52,6 @@ import com.uniaball.downloader.data.model.GitHubAsset
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.ui.components.DownloadProgressDialog
-import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
@@ -225,7 +224,7 @@ private fun SuccessView(releases: List<GitHubRelease>, modifier: Modifier = Modi
             )
         }
         itemsIndexed(items = releases, key = { _, it -> it.id }, contentType = { _, _ -> "desktopglues_release" }) { index, release ->
-            ReleaseCard(release = release, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
+            ReleaseCard(release = release, modifier = Modifier.animateItem())
         }
     }
 }

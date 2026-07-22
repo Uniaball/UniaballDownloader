@@ -49,7 +49,6 @@ import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.model.WorkflowRunPage
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.ui.components.DownloadProgressDialog
-import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
@@ -455,7 +454,7 @@ private fun BuildsList(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         itemsIndexed(items, key = { _, it -> it.artifact.id }, contentType = { _, _ -> "openjdk_build" }) { index, item ->
-            BuildCard(item = item, onDownload = onDownload, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
+            BuildCard(item = item, onDownload = onDownload, modifier = Modifier.animateItem())
         }
     }
 }
