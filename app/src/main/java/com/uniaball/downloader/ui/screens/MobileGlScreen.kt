@@ -114,44 +114,43 @@ class MobileGlViewModel : ViewModel() {
     }
 
     fun load() {
-        var hasContent = _uiState.value is MobileGlUiState.Success
-        if (!hasContent) {
-            // 优先从内存/磁盘缓存读取 artifacts，若有立即设 Success 态并标记 hasContent=true
-            val cached = UniaballRepository.loadMobileGlRunsFromDisk()
-            if (cached != null && cached.workflowRuns.isNotEmpty()) {
-                val runs = cached.workflowRuns.take(5)
-                val cachedItems = runs.mapNotNull { run ->
-                    val ap = UniaballRepository.loadArtifactsFromDisk(
-                        UniaballRepository.MOBILEGL_OWNER,
-                        UniaballRepository.MOBILEGL_REPO,
-                        run.id
-                    ) ?: return@mapNotNull null
-                    ap.artifacts.map { artifact -> MobileGlBuildItem(artifact, run) }
-                }.flatten().sortedByDescending { it.artifact.createdAt }
-                if (cachedItems.isNotEmpty()) {
-                    allItems = cachedItems
-                    _uiState.value = applyFilter()
-                    hasContent = true
+        viewModelScope.launch {
+            var hasContent = _uiState.value is MobileGlUiState.Success
+            if (!hasContent) {
+                // 优先从内存/磁盘缓存读取 artifacts，若有立即设 Success 态并标记 hasContent=true
+                // JSON 反序列化已移至 IO 线程
+                val cached = UniaballRepository.loadMobileGlRunsFromDisk()
+                if (cached != null && cached.workflowRuns.isNotEmpty()) {
+                    val runs = cached.workflowRuns.take(5)
+                    val cachedItems = runs.mapNotNull { run ->
+                        val ap = UniaballRepository.loadArtifactsFromDisk(
+                            UniaballRepository.MOBILEGL_OWNER,
+                            UniaballRepository.MOBILEGL_REPO,
+                            run.id
+                        ) ?: return@mapNotNull null
+                        ap.artifacts.map { artifact -> MobileGlBuildItem(artifact, run) }
+                    }.flatten().sortedByDescending { it.artifact.createdAt }
+                    if (cachedItems.isNotEmpty()) {
+                        allItems = cachedItems
+                        _uiState.value = applyFilter()
+                        hasContent = true
+                    } else {
+                        _uiState.value = MobileGlUiState.Loading
+                    }
                 } else {
                     _uiState.value = MobileGlUiState.Loading
                 }
             } else {
-                _uiState.value = MobileGlUiState.Loading
+                _isRefreshing.value = true
             }
-        } else {
-            _isRefreshing.value = true
-        }
 
-        // 节流：30 秒内不重复请求
-        if (hasContent && UniaballRepository.isFresh("mobilegl_runs")) {
-            viewModelScope.launch {
+            // 节流：30 秒内不重复请求
+            if (hasContent && UniaballRepository.isFresh("mobilegl_runs")) {
                 _snackbar.emit("请稍候再刷新")
                 _isRefreshing.value = false
+                return@launch
             }
-            return
-        }
 
-        viewModelScope.launch {
             try {
                 val runsPage = UniaballRepository.listMobileGlRuns()
                 val runs = runsPage.workflowRuns.take(5)

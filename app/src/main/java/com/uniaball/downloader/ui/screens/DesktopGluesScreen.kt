@@ -84,27 +84,26 @@ class DesktopGluesViewModel : ViewModel() {
     init { load() }
 
     fun load() {
-        var hasContent = _uiState.value is DesktopGluesUiState.Success
-        if (!hasContent) {
-            // 优先从磁盘缓存读取 releases，若有立即设 Success 态
-            val cached = UniaballRepository.loadDesktopGluesReleasesFromDisk()
-            if (cached != null && cached.isNotEmpty()) {
-                _uiState.value = DesktopGluesUiState.Success(cached)
-                hasContent = true
-            } else {
-                _uiState.value = DesktopGluesUiState.Loading
-            }
-        }
-
-        // 节流
-        if (hasContent && UniaballRepository.isFresh("desktopglues_releases")) {
-            viewModelScope.launch {
-                _snackbar.emit("请稍候再刷新")
-            }
-            return
-        }
-
         viewModelScope.launch {
+            var hasContent = _uiState.value is DesktopGluesUiState.Success
+            if (!hasContent) {
+                // 优先从磁盘缓存读取 releases，若有立即设 Success 态
+                // JSON 反序列化已移至 IO 线程
+                val cached = UniaballRepository.loadDesktopGluesReleasesFromDisk()
+                if (cached != null && cached.isNotEmpty()) {
+                    _uiState.value = DesktopGluesUiState.Success(cached)
+                    hasContent = true
+                } else {
+                    _uiState.value = DesktopGluesUiState.Loading
+                }
+            }
+
+            // 节流
+            if (hasContent && UniaballRepository.isFresh("desktopglues_releases")) {
+                _snackbar.emit("请稍候再刷新")
+                return@launch
+            }
+
             try {
                 val releases = UniaballRepository.listDesktopGluesReleases()
                 if (releases.isEmpty()) {
