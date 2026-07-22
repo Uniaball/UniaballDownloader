@@ -62,6 +62,12 @@ object InAppDownloadManager {
     private const val MULTI_THREAD_COUNT = 3
 
     private val client = OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            val req = chain.request().newBuilder()
+                .header("User-Agent", "UniaballDownloader-Android")
+                .build()
+            chain.proceed(req)
+        }
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(300, TimeUnit.SECONDS)
         .followRedirects(true)
@@ -152,9 +158,13 @@ object InAppDownloadManager {
     // 单线程下载（fallback 路径，行为与原实现保持一致）
     private suspend fun downloadSingleThread(url: String, file: File) {
         var response: okhttp3.Response? = null
-        val tmpFile = File(file.parentFile, "${file.name}.tmp")
+        val defaultTmpFile = File(file.parentFile, "${file.name}.tmp")
+        val tmpFile = if (ensureFileDeletable(defaultTmpFile)) {
+            defaultTmpFile
+        } else {
+            File(file.parentFile, "${file.name}.${System.currentTimeMillis()}.tmp")
+        }
         try {
-            ensureFileDeletable(tmpFile)
             val request = Request.Builder().url(url).build()
             response = client.newCall(request).execute()
 
@@ -242,6 +252,7 @@ object InAppDownloadManager {
             UniaballRepository.clearCache()
         } finally {
             response?.close()
+            tmpFile.delete()
         }
     }
 
@@ -272,8 +283,12 @@ object InAppDownloadManager {
         }
 
         cleanupPartFiles(file)
-        val tmpFile = File(file.parentFile, "${file.name}.tmp")
-        ensureFileDeletable(tmpFile)
+        val defaultTmpFile = File(file.parentFile, "${file.name}.tmp")
+        val tmpFile = if (ensureFileDeletable(defaultTmpFile)) {
+            defaultTmpFile
+        } else {
+            File(file.parentFile, "${file.name}.${System.currentTimeMillis()}.tmp")
+        }
         val partFiles = (0 until MULTI_THREAD_COUNT).map { i ->
             File(file.parentFile, "${file.name}.part$i")
         }
