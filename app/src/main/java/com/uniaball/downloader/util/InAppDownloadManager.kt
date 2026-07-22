@@ -162,41 +162,81 @@ object InAppDownloadManager {
      */
     private fun publishToDownloads(file: File, fileName: String): Boolean {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return false
+        val resolver = appContext.contentResolver
+        val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/UniaballDownloader"
+
+        // 1. 插入前清理同 DISPLAY_NAME + RELATIVE_PATH 且 IS_PENDING=1 的孤儿条目，避免冲突
         try {
-            val resolver = appContext.contentResolver
+            val pendingSelection = "${android.provider.MediaStore.Downloads.DISPLAY_NAME} = ? AND " +
+                "${android.provider.MediaStore.Downloads.RELATIVE_PATH} = ? AND " +
+                "${android.provider.MediaStore.Downloads.IS_PENDING} = 1"
+            val pendingArgs = arrayOf(fileName, relativePath)
+            resolver.delete(collection, pendingSelection, pendingArgs)
+        } catch (e: Exception) {
+            LogUtil.w("Download", "清理孤儿 pending 条目失败(可忽略): ${e.message}")
+        }
+
+        // 2. 插入新条目
+        var uri: android.net.Uri? = null
+        var published = false
+        try {
             val mimeType = getMimeType(fileName)
             val values = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
                 put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
-                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/UniaballDownloader")
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, relativePath)
                 put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
             }
-            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            uri = resolver.insert(collection, values)
             if (uri == null) {
-                LogUtil.w("Download", "MediaStore 插入失败，跳过发布到公共 Downloads")
+                LogUtil.w("Download", "MediaStore 插入失败,保留私有副本作为 fallback: $fileName")
                 return false
             }
-            resolver.openOutputStream(uri)?.use { output ->
+
+            // 3. 复制流；仅当复制真正完成才标记 published
+            val output = resolver.openOutputStream(uri)
+            if (output == null) {
+                LogUtil.w("Download", "openOutputStream 返回 null,删除 pending 条目,保留私有副本: $fileName")
+                runCatching { resolver.delete(uri, null, null) }
+                return false
+            }
+            output.use { out ->
                 file.inputStream().buffered().use { input ->
                     val buffer = ByteArray(8192)
                     var bytesRead: Int
                     while (input.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
+                        out.write(buffer, 0, bytesRead)
                     }
                 }
             }
+            published = true
+
+            // 4. 复制成功后才更新 IS_PENDING=0
             val updateValues = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
             }
             resolver.update(uri, updateValues, null, null)
-            if (file.delete()) {
-                LogUtil.i("Download", "已发布到公共 Downloads，私有副本已删除: $fileName")
+
+            // 5. 删除私有副本(重试 3 次,间隔 50ms;仍失败则 deleteOnExit 兜底)
+            var deleted = false
+            for (attempt in 1..3) {
+                if (file.delete()) { deleted = true; break }
+                if (attempt < 3) Thread.sleep(50)
+            }
+            if (deleted) {
+                LogUtil.i("Download", "已发布到公共 Downloads,私有副本已删除: $fileName")
             } else {
-                LogUtil.w("Download", "已发布到公共 Downloads，但私有副本删除失败: ${file.absolutePath}")
+                file.deleteOnExit()
+                LogUtil.w("Download", "已发布到公共 Downloads,私有副本删除重试失败,已安排 deleteOnExit 兜底: ${file.absolutePath}")
             }
             return true
         } catch (e: Exception) {
-            LogUtil.w("Download", "发布到公共 Downloads 失败: ${e.message}")
+            LogUtil.w("Download", "发布到公共 Downloads 失败,保留私有副本作为 fallback: ${e.message}")
+            // 清理可能的孤儿条目(若已插入)
+            if (!published) {
+                uri?.let { runCatching { resolver.delete(it, null, null) } }
+            }
             return false
         }
     }
@@ -310,7 +350,10 @@ object InAppDownloadManager {
             // 原子化：临时文件重命名为目标文件
             atomicMoveOrCopy(tmpFile, file)
 
-            publishToDownloads(file, file.name)
+            val published = publishToDownloads(file, file.name)
+            if (!published) {
+                LogUtil.w("Download", "发布到公共 Downloads 失败,保留私有副本作为 fallback: ${file.name}")
+            }
             _downloadState.value = _downloadState.value.copy(
                 status = DownloadStatus.COMPLETED,
                 downloadedBytes = totalRead,
@@ -427,7 +470,10 @@ object InAppDownloadManager {
             // 原子化：临时文件重命名为目标文件
             atomicMoveOrCopy(tmpFile, file)
 
-            publishToDownloads(file, file.name)
+            val published = publishToDownloads(file, file.name)
+            if (!published) {
+                LogUtil.w("Download", "发布到公共 Downloads 失败,保留私有副本作为 fallback: ${file.name}")
+            }
             _downloadState.value = _downloadState.value.copy(
                 status = DownloadStatus.COMPLETED,
                 downloadedBytes = contentLength,
