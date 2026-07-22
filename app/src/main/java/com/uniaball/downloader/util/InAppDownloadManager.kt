@@ -6,20 +6,25 @@ import android.os.Environment
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.uniaball.downloader.data.repository.UniaballRepository
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLongArray
 
 enum class DownloadStatus {
     IDLE,
@@ -52,6 +57,9 @@ object InAppDownloadManager {
     private var downloadJob: Job? = null
     private var downloadDir: File? = null
 
+    // 多线程下载分片数
+    private const val MULTI_THREAD_COUNT = 3
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(300, TimeUnit.SECONDS)
@@ -79,79 +87,29 @@ object InAppDownloadManager {
         speedSamples.clear()
 
         downloadJob = scope.launch {
-            var response: okhttp3.Response? = null
             try {
                 val dir = downloadDir ?: throw IllegalStateException("Download directory not initialized")
                 val file = File(dir, sanitizeFileName(fileName))
                 if (file.exists()) {
                     file.delete()
                 }
-                val request = Request.Builder().url(url).build()
-                response = client.newCall(request).execute()
-
-                if (!response.isSuccessful) {
-                    LogUtil.e("Download", "HTTP ${response.code}: ${response.message}")
-                    _downloadState.value = _downloadState.value.copy(
-                        status = DownloadStatus.FAILED,
-                        error = "HTTP ${response.code}: ${response.message}"
-                    )
-                    return@launch
-                }
-
-                val body = response.body ?: run {
-                    _downloadState.value = _downloadState.value.copy(
-                        status = DownloadStatus.FAILED,
-                        error = "响应体为空"
-                    )
-                    return@launch
-                }
-
-                val contentLength = body.contentLength()
-                val source = body.source()
-
                 _downloadState.value = _downloadState.value.copy(
-                    totalBytes = contentLength,
                     filePath = file.absolutePath
                 )
 
-                var totalRead = 0L
-                file.outputStream().buffered().use { output ->
-                    val buffer = ByteArray(8192)
-                    var lastReportTime = System.currentTimeMillis()
-                    var bytesRead: Int
-                    while (isActive) {
-                        bytesRead = source.read(buffer)
-                        if (bytesRead == -1) break
-                        output.write(buffer, 0, bytesRead)
-                        totalRead += bytesRead
-
-                        val now = System.currentTimeMillis()
-                        if (now - lastReportTime >= 200) {
-                            lastReportTime = now
-                            val speed = updateSpeed(now, totalRead)
-                            _downloadState.value = _downloadState.value.copy(
-                                downloadedBytes = totalRead,
-                                speedBytesPerSec = speed
-                            )
-                        }
+                val multiEnabled = UniaballRepository.isMultiThreadDownload.value
+                if (multiEnabled) {
+                    val (supported, len) = checkRangeSupport(url)
+                    if (supported) {
+                        downloadMultiThread(url, file, len)
+                    } else {
+                        downloadSingleThread(url, file)
                     }
+                } else {
+                    downloadSingleThread(url, file)
                 }
-
-                if (!isActive) {
-                    file.delete()
-                    _downloadState.value = _downloadState.value.copy(
-                        status = DownloadStatus.CANCELLED
-                    )
-                    return@launch
-                }
-
-                _downloadState.value = _downloadState.value.copy(
-                    status = DownloadStatus.COMPLETED,
-                    downloadedBytes = totalRead,
-                    speedBytesPerSec = 0L
-                )
-                LogUtil.i("Download", "下载完成: $fileName (${totalRead} bytes)")
-                UniaballRepository.clearCache()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (isActive) {
                     LogUtil.e("Download", "下载失败: $fileName", e)
@@ -160,8 +118,218 @@ object InAppDownloadManager {
                         error = e.message ?: "下载失败"
                     )
                 }
-            } finally {
-                response?.close()
+            }
+        }
+    }
+
+    // 单线程下载（fallback 路径，行为与原实现保持一致）
+    private suspend fun downloadSingleThread(url: String, file: File) {
+        var response: okhttp3.Response? = null
+        try {
+            val request = Request.Builder().url(url).build()
+            response = client.newCall(request).execute()
+
+            if (!response.isSuccessful) {
+                LogUtil.e("Download", "HTTP ${response.code}: ${response.message}")
+                _downloadState.value = _downloadState.value.copy(
+                    status = DownloadStatus.FAILED,
+                    error = "HTTP ${response.code}: ${response.message}"
+                )
+                return
+            }
+
+            val body = response.body ?: run {
+                _downloadState.value = _downloadState.value.copy(
+                    status = DownloadStatus.FAILED,
+                    error = "响应体为空"
+                )
+                return
+            }
+
+            val contentLength = body.contentLength()
+            val source = body.source()
+
+            _downloadState.value = _downloadState.value.copy(
+                totalBytes = contentLength,
+                filePath = file.absolutePath
+            )
+
+            var totalRead = 0L
+            file.outputStream().buffered().use { output ->
+                val buffer = ByteArray(8192)
+                var lastReportTime = System.currentTimeMillis()
+                var bytesRead: Int
+                while (isActive) {
+                    bytesRead = source.read(buffer)
+                    if (bytesRead == -1) break
+                    output.write(buffer, 0, bytesRead)
+                    totalRead += bytesRead
+
+                    val now = System.currentTimeMillis()
+                    if (now - lastReportTime >= 200) {
+                        lastReportTime = now
+                        val speed = updateSpeed(now, totalRead)
+                        _downloadState.value = _downloadState.value.copy(
+                            downloadedBytes = totalRead,
+                            speedBytesPerSec = speed
+                        )
+                    }
+                }
+            }
+
+            if (!isActive) {
+                file.delete()
+                _downloadState.value = _downloadState.value.copy(
+                    status = DownloadStatus.CANCELLED
+                )
+                return
+            }
+
+            _downloadState.value = _downloadState.value.copy(
+                status = DownloadStatus.COMPLETED,
+                downloadedBytes = totalRead,
+                speedBytesPerSec = 0L
+            )
+            LogUtil.i("Download", "下载完成: ${_downloadState.value.fileName} (${totalRead} bytes)")
+            UniaballRepository.clearCache()
+        } finally {
+            response?.close()
+        }
+    }
+
+    // 检测服务器是否支持 Range 请求，返回 (支持, 总大小)
+    private suspend fun checkRangeSupport(url: String): Pair<Boolean, Long> = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url).head().build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@withContext false to 0L
+            val acceptsRanges = response.header("Accept-Ranges")?.equals("bytes", ignoreCase = true) == true
+            val len = response.body?.contentLength() ?: -1L
+            (acceptsRanges && len > 0) to (if (len > 0) len else 0L)
+        }
+    }
+
+    // 多线程分片下载：将 [0, contentLength) 拆成 MULTI_THREAD_COUNT 段并发下载
+    private suspend fun downloadMultiThread(url: String, file: File, contentLength: Long) {
+        val chunkSize = contentLength / MULTI_THREAD_COUNT
+        val ranges = ArrayList<Pair<Long, Long>>(MULTI_THREAD_COUNT)
+        var start = 0L
+        for (i in 0 until MULTI_THREAD_COUNT) {
+            val end = if (i == MULTI_THREAD_COUNT - 1) {
+                contentLength - 1
+            } else {
+                start + chunkSize - 1
+            }
+            ranges.add(start to end)
+            start = end + 1
+        }
+
+        cleanupPartFiles(file)
+        val partFiles = (0 until MULTI_THREAD_COUNT).map { i ->
+            File(file.parentFile, "${file.name}.part$i")
+        }
+        val chunkBytes = AtomicLongArray(MULTI_THREAD_COUNT)
+
+        _downloadState.value = _downloadState.value.copy(
+            totalBytes = contentLength
+        )
+
+        try {
+            coroutineScope {
+                for (i in 0 until MULTI_THREAD_COUNT) {
+                    launch {
+                        val (rangeStart, rangeEnd) = ranges[i]
+                        val partFile = partFiles[i]
+                        val request = Request.Builder()
+                            .url(url)
+                            .header("Range", "bytes=$rangeStart-$rangeEnd")
+                            .build()
+                        val response = client.newCall(request).execute()
+                        try {
+                            if (!response.isSuccessful) {
+                                throw IOException("分片下载失败 HTTP ${response.code}")
+                            }
+                            val source = response.body!!.source()
+                            partFile.outputStream().buffered().use { output ->
+                                val buffer = ByteArray(8192)
+                                var bytesRead: Int
+                                var lastReportTime = System.currentTimeMillis()
+                                while (isActive) {
+                                    bytesRead = source.read(buffer)
+                                    if (bytesRead == -1) break
+                                    output.write(buffer, 0, bytesRead)
+                                    chunkBytes.addAndGet(i, bytesRead.toLong())
+
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastReportTime >= 200) {
+                                        lastReportTime = now
+                                        var total = 0L
+                                        for (j in 0 until MULTI_THREAD_COUNT) {
+                                            total += chunkBytes.get(j)
+                                        }
+                                        val speed = updateSpeed(now, total)
+                                        _downloadState.value = _downloadState.value.copy(
+                                            downloadedBytes = total,
+                                            speedBytesPerSec = speed
+                                        )
+                                    }
+                                }
+                            }
+                        } finally {
+                            response.close()
+                        }
+                    }
+                }
+            }
+
+            // 合并分片到目标文件
+            file.outputStream().buffered().use { output ->
+                val buffer = ByteArray(8192)
+                for (partFile in partFiles) {
+                    if (!partFile.exists()) {
+                        throw IOException("分片文件缺失: ${partFile.name}")
+                    }
+                    partFile.inputStream().buffered().use { input ->
+                        var bytesRead: Int
+                        while (true) {
+                            bytesRead = input.read(buffer)
+                            if (bytesRead == -1) break
+                            output.write(buffer, 0, bytesRead)
+                        }
+                    }
+                }
+            }
+
+            _downloadState.value = _downloadState.value.copy(
+                status = DownloadStatus.COMPLETED,
+                downloadedBytes = contentLength,
+                speedBytesPerSec = 0L
+            )
+            LogUtil.i("Download", "多线程下载完成: ${_downloadState.value.fileName} (${contentLength} bytes)")
+            UniaballRepository.clearCache()
+        } catch (e: CancellationException) {
+            file.delete()
+            _downloadState.value = _downloadState.value.copy(
+                status = DownloadStatus.CANCELLED
+            )
+            throw e
+        } catch (e: Exception) {
+            file.delete()
+            _downloadState.value = _downloadState.value.copy(
+                status = DownloadStatus.FAILED,
+                error = e.message ?: "多线程下载失败"
+            )
+        } finally {
+            cleanupPartFiles(file)
+        }
+    }
+
+    // 清理所有分片临时文件
+    private fun cleanupPartFiles(file: File) {
+        val parent = file.parentFile ?: return
+        for (i in 0 until MULTI_THREAD_COUNT) {
+            val partFile = File(parent, "${file.name}.part$i")
+            if (partFile.exists()) {
+                partFile.delete()
             }
         }
     }
@@ -214,15 +382,15 @@ object InAppDownloadManager {
         }
     }
 
-    private fun updateSpeed(now: Long, totalBytes: Long): Long {
+    private fun updateSpeed(now: Long, totalBytes: Long): Long = synchronized(speedSamples) {
         speedSamples.add(now to totalBytes)
         speedSamples.removeAll { (t, _) -> now - t > 2000L }
-        if (speedSamples.size < 2) return 0L
+        if (speedSamples.size < 2) return@synchronized 0L
         val first = speedSamples.first()
         val last = speedSamples.last()
         val deltaSec = (last.first - first.first) / 1000.0
-        if (deltaSec <= 0) return 0L
-        return ((last.second - first.second) / deltaSec).toLong()
+        if (deltaSec <= 0) return@synchronized 0L
+        ((last.second - first.second) / deltaSec).toLong()
     }
 
     private fun sanitizeFileName(name: String): String {

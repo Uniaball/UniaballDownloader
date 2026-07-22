@@ -106,6 +106,7 @@ object UniaballRepository {
     private const val KEY_ARTIFACTS_PREFIX = "cache_artifacts_"
     private const val KEY_MIRROR_ENABLED = "pref_mirror_enabled"
     private const val KEY_MOBILEGL_APK_ONLY = "pref_mobilegl_apk_only"
+    private const val KEY_MULTI_THREAD_DOWNLOAD = "pref_multi_thread_download"
 
     // gh-proxy 镜像下载开关（默认开启，与原网站一致）
     private val _isMirrorEnabled = MutableStateFlow(true)
@@ -115,12 +116,17 @@ object UniaballRepository {
     private val _isMobileGlApkOnly = MutableStateFlow(true)
     val isMobileGlApkOnly: StateFlow<Boolean> = _isMobileGlApkOnly.asStateFlow()
 
+    // 多线程下载实验性开关（默认关闭）
+    private val _isMultiThreadDownload = MutableStateFlow(false)
+    val isMultiThreadDownload: StateFlow<Boolean> = _isMultiThreadDownload.asStateFlow()
+
     fun init(context: Context) {
         appContext = context.applicationContext
         // 从磁盘读取镜像开关初始值（默认 true）
         val prefs = appContext?.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         _isMirrorEnabled.value = prefs?.getBoolean(KEY_MIRROR_ENABLED, true) ?: true
         _isMobileGlApkOnly.value = prefs?.getBoolean(KEY_MOBILEGL_APK_ONLY, true) ?: true
+        _isMultiThreadDownload.value = prefs?.getBoolean(KEY_MULTI_THREAD_DOWNLOAD, false) ?: false
     }
 
     fun setMirrorEnabled(enabled: Boolean) {
@@ -135,6 +141,13 @@ object UniaballRepository {
         _isMobileGlApkOnly.value = enabled
         val prefs = prefs() ?: return
         prefs.edit().putBoolean(KEY_MOBILEGL_APK_ONLY, enabled).apply()
+    }
+
+    fun setMultiThreadDownload(enabled: Boolean) {
+        LogUtil.i("Settings", "多线程下载: ${if (enabled) "开启" else "关闭"}")
+        _isMultiThreadDownload.value = enabled
+        val prefs = prefs() ?: return
+        prefs.edit().putBoolean(KEY_MULTI_THREAD_DOWNLOAD, enabled).apply()
     }
 
     /**

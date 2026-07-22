@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -51,6 +52,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val mirrorEnabled by UniaballRepository.isMirrorEnabled.collectAsStateWithLifecycle()
     val apkOnly by UniaballRepository.isMobileGlApkOnly.collectAsStateWithLifecycle()
+    val multiThread by UniaballRepository.isMultiThreadDownload.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
@@ -135,6 +137,43 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 Switch(
                     checked = apkOnly,
                     onCheckedChange = { UniaballRepository.setMobileGlApkOnly(it) }
+                )
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Speed,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "多线程下载（实验性）",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "通过 HTTP Range 并发分片加速下载，部分服务器可能不支持",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = multiThread,
+                    onCheckedChange = { UniaballRepository.setMultiThreadDownload(it) }
                 )
             }
         }
