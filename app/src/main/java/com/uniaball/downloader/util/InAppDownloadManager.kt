@@ -97,7 +97,6 @@ object InAppDownloadManager {
                 }
                 LogUtil.i("Download", "下载目录就绪: ${dir.absolutePath}")
                 val file = File(dir, sanitizeFileName(fileName))
-                ensureFileDeletable(file)
                 _downloadState.value = _downloadState.value.copy(
                     filePath = file.absolutePath
                 )
@@ -118,15 +117,7 @@ object InAppDownloadManager {
             } catch (e: Exception) {
                 if (isActive) {
                     LogUtil.e("Download", "下载失败: $fileName", e)
-                    val error = when {
-                        e.message?.contains("EEXIST", ignoreCase = true) == true -> {
-                            "文件已存在且无法覆盖，请手动删除后重试: ${File(dir, sanitizeFileName(fileName)).absolutePath}"
-                        }
-                        e.message?.contains("ENOENT", ignoreCase = true) == true -> {
-                            "下载目录不存在或无法创建，请检查存储权限: ${dir?.absolutePath}"
-                        }
-                        else -> e.message ?: "下载失败"
-                    }
+                    val error = e.message ?: "下载失败"
                     _downloadState.value = _downloadState.value.copy(
                         status = DownloadStatus.FAILED,
                         error = error
@@ -138,10 +129,10 @@ object InAppDownloadManager {
 
     /**
      * 健壮地清理目标文件路径：处理普通文件和目录两种情况。
-     * 删除失败时抛出包含路径的明确异常，避免后续 outputStream 冲突 (EEXIST)。
+     * 删除失败时记录警告并返回 false，由调用方决定后续处理。
      */
-    private fun ensureFileDeletable(file: File) {
-        if (!file.exists()) return
+    private fun ensureFileDeletable(file: File): Boolean {
+        if (!file.exists()) return true
         val deleted = if (file.isDirectory) {
             LogUtil.w("Download", "目标路径是目录，尝试递归删除: ${file.absolutePath}")
             file.deleteRecursively()
@@ -149,12 +140,13 @@ object InAppDownloadManager {
             file.delete()
         }
         if (!deleted && file.exists()) {
-            LogUtil.e("Download", "文件删除失败: ${file.absolutePath}")
-            throw IOException("无法删除已存在的文件，请手动删除后重试: ${file.absolutePath}")
+            LogUtil.w("Download", "文件删除失败，将尝试继续: ${file.absolutePath}")
+            return false
         }
         if (deleted) {
             LogUtil.i("Download", "已清理旧文件: ${file.absolutePath}")
         }
+        return true
     }
 
     // 单线程下载（fallback 路径，行为与原实现保持一致）
@@ -223,9 +215,10 @@ object InAppDownloadManager {
             }
 
             // 原子化：临时文件重命名为目标文件
-            ensureFileDeletable(file)
-            if (!tmpFile.renameTo(file)) {
-                // renameTo 失败时回退为复制 + 删除
+            if (ensureFileDeletable(file) && tmpFile.renameTo(file)) {
+                LogUtil.i("Download", "文件重命名成功: ${tmpFile.name} -> ${file.name}")
+            } else {
+                // renameTo 失败或目标不可删除，回退为复制 + 删除
                 LogUtil.w("Download", "renameTo 失败，回退为复制: ${tmpFile.name} -> ${file.name}")
                 tmpFile.inputStream().buffered().use { input ->
                     file.outputStream().buffered().use { output ->
@@ -357,8 +350,9 @@ object InAppDownloadManager {
             }
 
             // 原子化：临时文件重命名为目标文件
-            ensureFileDeletable(file)
-            if (!tmpFile.renameTo(file)) {
+            if (ensureFileDeletable(file) && tmpFile.renameTo(file)) {
+                LogUtil.i("Download", "文件重命名成功: ${tmpFile.name} -> ${file.name}")
+            } else {
                 LogUtil.w("Download", "renameTo 失败，回退为复制: ${tmpFile.name} -> ${file.name}")
                 tmpFile.inputStream().buffered().use { input ->
                     file.outputStream().buffered().use { output ->
