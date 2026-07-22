@@ -169,6 +169,7 @@ object InAppDownloadManager {
                 put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
                 put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
                 put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/UniaballDownloader")
+                put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
             }
             val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             if (uri == null) {
@@ -184,6 +185,10 @@ object InAppDownloadManager {
                     }
                 }
             }
+            val updateValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+            }
+            resolver.update(uri, updateValues, null, null)
             file.delete()
             LogUtil.i("Download", "已发布到公共 Downloads: $fileName")
             return true

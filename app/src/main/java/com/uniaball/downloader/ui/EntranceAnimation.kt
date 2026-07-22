@@ -3,7 +3,6 @@ package com.uniaball.downloader.ui
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -11,7 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
@@ -34,5 +33,8 @@ fun Modifier.entranceAnimation(
         animationSpec = tween(durationMillis),
         label = "entrance-offset"
     )
-    this.alpha(alpha).offset(y = offsetY)
+    this.graphicsLayer {
+        this.alpha = alpha
+        this.translationY = offsetY.toPx()
+    }
 }
