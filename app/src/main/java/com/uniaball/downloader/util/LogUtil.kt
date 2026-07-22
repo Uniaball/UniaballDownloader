@@ -18,10 +18,48 @@ object LogUtil {
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
 
-    fun d(tag: String, msg: String) = Log.d("$TAG/$tag", msg)
-    fun i(tag: String, msg: String) = Log.i("$TAG/$tag", msg)
-    fun w(tag: String, msg: String, tr: Throwable? = null) = Log.w("$TAG/$tag", msg, tr)
-    fun e(tag: String, msg: String, tr: Throwable? = null) = Log.e("$TAG/$tag", msg, tr)
+    private const val MAX_LOG_ENTRIES = 500
+    private val logBuffer = ArrayDeque<String>()
+
+    private fun appendLog(level: String, tag: String, msg: String, tr: Throwable? = null) {
+        synchronized(logBuffer) {
+            val timestamp = dateFormat.format(Date())
+            val entry = buildString {
+                append(timestamp)
+                append(" ")
+                append(level)
+                append("/")
+                append(tag)
+                append(": ")
+                append(msg)
+                if (tr != null) {
+                    append("\n")
+                    append(tr.stackTraceToString())
+                }
+            }
+            logBuffer.addLast(entry)
+            while (logBuffer.size > MAX_LOG_ENTRIES) {
+                logBuffer.removeFirst()
+            }
+        }
+    }
+
+    fun d(tag: String, msg: String) {
+        Log.d("$TAG/$tag", msg)
+        appendLog("D", tag, msg)
+    }
+    fun i(tag: String, msg: String) {
+        Log.i("$TAG/$tag", msg)
+        appendLog("I", tag, msg)
+    }
+    fun w(tag: String, msg: String, tr: Throwable? = null) {
+        Log.w("$TAG/$tag", msg, tr)
+        appendLog("W", tag, msg, tr)
+    }
+    fun e(tag: String, msg: String, tr: Throwable? = null) {
+        Log.e("$TAG/$tag", msg, tr)
+        appendLog("E", tag, msg, tr)
+    }
 
     fun exportLogs(context: Context): File {
         val logFile = File(context.cacheDir, LOG_FILE_NAME)
@@ -32,23 +70,14 @@ object LogUtil {
             writer.write("Exported: ${dateFormat.format(Date())}\n")
             writer.write("Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (SDK ${android.os.Build.VERSION.SDK_INT})\n")
             writer.write("=" .repeat(60) + "\n\n")
-            writer.write("[LOGCAT DUMP BELOW]\n\n")
+            writer.write("[APP LOGS BELOW]\n\n")
 
-            val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "threadtime"))
-            process.inputStream.bufferedReader().use { reader ->
-                val pid = android.os.Process.myPid().toString()
-                val packageName = context.packageName
-                reader.lines()
-                    .filter { line ->
-                        line.contains(packageName) || line.contains("UniaballDL") ||
-                            line.contains("PID:$pid ") || line.contains("androidruntime")
-                    }
-                    .forEach { line ->
-                        writer.write(line)
-                        writer.newLine()
-                    }
+            synchronized(logBuffer) {
+                logBuffer.forEach { entry ->
+                    writer.write(entry)
+                    writer.newLine()
+                }
             }
-            process.waitFor()
         }
 
         return logFile

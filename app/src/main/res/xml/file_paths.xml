@@ -3,6 +3,9 @@
     <external-path
         name="downloads"
         path="Download/UniaballDownloader/" />
+    <external-files-path
+        name="app_downloads"
+        path="Download/UniaballDownloader/" />
     <cache-path
         name="logs"
         path="/" />

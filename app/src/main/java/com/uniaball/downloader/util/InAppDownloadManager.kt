@@ -57,6 +57,7 @@ object InAppDownloadManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var downloadJob: Job? = null
     private var downloadDir: File? = null
+    private lateinit var appContext: Context
 
     // 多线程下载分片数
     private const val MULTI_THREAD_COUNT = 3
@@ -76,10 +77,10 @@ object InAppDownloadManager {
     private val speedSamples = mutableListOf<Pair<Long, Long>>()
 
     fun init(context: Context) {
-        downloadDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "UniaballDownloader"
-        )
+        appContext = context
+        downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let {
+            File(it, "UniaballDownloader")
+        }
         downloadDir?.mkdirs()
     }
 
@@ -153,6 +154,40 @@ object InAppDownloadManager {
             LogUtil.i("Download", "已清理旧文件: ${file.absolutePath}")
         }
         return true
+    }
+
+    /**
+     * 下载完成后通过 MediaStore 将文件发布到公共 Downloads/UniaballDownloader 目录。
+     * 仅 API 29+ 可用；失败时记录警告日志，不影响下载成功状态。
+     */
+    private fun publishToDownloads(file: File, fileName: String) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return
+        try {
+            val resolver = appContext.contentResolver
+            val mimeType = getMimeType(fileName)
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/UniaballDownloader")
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri == null) {
+                LogUtil.w("Download", "MediaStore 插入失败，跳过发布到公共 Downloads")
+                return
+            }
+            resolver.openOutputStream(uri)?.use { output ->
+                file.inputStream().buffered().use { input ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                    }
+                }
+            }
+            LogUtil.i("Download", "已发布到公共 Downloads: $fileName")
+        } catch (e: Exception) {
+            LogUtil.w("Download", "发布到公共 Downloads 失败: ${e.message}")
+        }
     }
 
     // 单线程下载（fallback 路径，行为与原实现保持一致）
@@ -242,6 +277,7 @@ object InAppDownloadManager {
                 tmpFile.delete()
             }
 
+            publishToDownloads(file, file.name)
             _downloadState.value = _downloadState.value.copy(
                 status = DownloadStatus.COMPLETED,
                 downloadedBytes = totalRead,
@@ -381,6 +417,7 @@ object InAppDownloadManager {
                 tmpFile.delete()
             }
 
+            publishToDownloads(file, file.name)
             _downloadState.value = _downloadState.value.copy(
                 status = DownloadStatus.COMPLETED,
                 downloadedBytes = contentLength,
