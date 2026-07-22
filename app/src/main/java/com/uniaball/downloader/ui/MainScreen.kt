@@ -90,7 +90,9 @@ fun MainScreen() {
         // 缓存派生的 ScreenSlot，避免每次重组都 new 新实例（否则仍不稳定）。
         // 依赖 subScreen 与 current，仅当二者变化时才重新计算。
         val screenSlot = remember(subScreen, current) {
-            if (subScreen != null) ScreenSlot.Sub(subScreen) else ScreenSlot.Main(current)
+            // subScreen 是 delegated property,无法 smart cast,用局部变量捕获后再判空
+            val sub = subScreen
+            if (sub != null) ScreenSlot.Sub(sub) else ScreenSlot.Main(current)
         }
         AnimatedContent(
             targetState = screenSlot,
