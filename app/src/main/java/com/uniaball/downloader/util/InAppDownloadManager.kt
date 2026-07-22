@@ -189,8 +189,11 @@ object InAppDownloadManager {
                 put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
             }
             resolver.update(uri, updateValues, null, null)
-            file.delete()
-            LogUtil.i("Download", "已发布到公共 Downloads: $fileName")
+            if (file.delete()) {
+                LogUtil.i("Download", "已发布到公共 Downloads，私有副本已删除: $fileName")
+            } else {
+                LogUtil.w("Download", "已发布到公共 Downloads，但私有副本删除失败: ${file.absolutePath}")
+            }
             return true
         } catch (e: Exception) {
             LogUtil.w("Download", "发布到公共 Downloads 失败: ${e.message}")
@@ -482,22 +485,7 @@ object InAppDownloadManager {
         val file = File(state.filePath)
         val mimeType = getMimeType(state.fileName)
 
-        if (file.exists()) {
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mimeType)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            runCatching {
-                context.startActivity(Intent.createChooser(intent, "查看文件"))
-            }.onFailure {
-                Toast.makeText(context, "无法打开文件，文件路径：${file.absolutePath}", Toast.LENGTH_LONG).show()
-            }
-            return
-        }
-
-        // 私有文件不存在（已发布到公共 Downloads 后被清理），从 MediaStore 查询
+        // API 29+：优先从 MediaStore 查询公共 Downloads 中的文件
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
             val projection = arrayOf(android.provider.MediaStore.Downloads._ID)
@@ -520,6 +508,22 @@ object InAppDownloadManager {
                     return
                 }
             }
+        }
+
+        // 回退：从私有目录通过 FileProvider 打开
+        if (file.exists()) {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                context.startActivity(Intent.createChooser(intent, "查看文件"))
+            }.onFailure {
+                Toast.makeText(context, "无法打开文件，文件路径：${file.absolutePath}", Toast.LENGTH_LONG).show()
+            }
+            return
         }
 
         Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
