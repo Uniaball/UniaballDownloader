@@ -88,12 +88,16 @@ object InAppDownloadManager {
         speedSamples.clear()
 
         downloadJob = scope.launch {
+            var dir: File? = null
             try {
-                val dir = downloadDir ?: throw IllegalStateException("Download directory not initialized")
-                val file = File(dir, sanitizeFileName(fileName))
-                if (file.exists()) {
-                    file.delete()
+                dir = downloadDir ?: throw IllegalStateException("Download directory not initialized")
+                if (!dir.exists() && !dir.mkdirs()) {
+                    LogUtil.e("Download", "下载目录创建失败: ${dir.absolutePath}")
+                    throw IOException("下载目录创建失败，请检查存储权限: ${dir.absolutePath}")
                 }
+                LogUtil.i("Download", "下载目录就绪: ${dir.absolutePath}")
+                val file = File(dir, sanitizeFileName(fileName))
+                ensureFileDeletable(file)
                 _downloadState.value = _downloadState.value.copy(
                     filePath = file.absolutePath
                 )
@@ -114,19 +118,51 @@ object InAppDownloadManager {
             } catch (e: Exception) {
                 if (isActive) {
                     LogUtil.e("Download", "下载失败: $fileName", e)
+                    val error = when {
+                        e.message?.contains("EEXIST", ignoreCase = true) == true -> {
+                            "文件已存在且无法覆盖，请手动删除后重试: ${File(dir, sanitizeFileName(fileName)).absolutePath}"
+                        }
+                        e.message?.contains("ENOENT", ignoreCase = true) == true -> {
+                            "下载目录不存在或无法创建，请检查存储权限: ${dir?.absolutePath}"
+                        }
+                        else -> e.message ?: "下载失败"
+                    }
                     _downloadState.value = _downloadState.value.copy(
                         status = DownloadStatus.FAILED,
-                        error = e.message ?: "下载失败"
+                        error = error
                     )
                 }
             }
         }
     }
 
+    /**
+     * 健壮地清理目标文件路径：处理普通文件和目录两种情况。
+     * 删除失败时抛出包含路径的明确异常，避免后续 outputStream 冲突 (EEXIST)。
+     */
+    private fun ensureFileDeletable(file: File) {
+        if (!file.exists()) return
+        val deleted = if (file.isDirectory) {
+            LogUtil.w("Download", "目标路径是目录，尝试递归删除: ${file.absolutePath}")
+            file.deleteRecursively()
+        } else {
+            file.delete()
+        }
+        if (!deleted && file.exists()) {
+            LogUtil.e("Download", "文件删除失败: ${file.absolutePath}")
+            throw IOException("无法删除已存在的文件，请手动删除后重试: ${file.absolutePath}")
+        }
+        if (deleted) {
+            LogUtil.i("Download", "已清理旧文件: ${file.absolutePath}")
+        }
+    }
+
     // 单线程下载（fallback 路径，行为与原实现保持一致）
     private suspend fun downloadSingleThread(url: String, file: File) {
         var response: okhttp3.Response? = null
+        val tmpFile = File(file.parentFile, "${file.name}.tmp")
         try {
+            ensureFileDeletable(tmpFile)
             val request = Request.Builder().url(url).build()
             response = client.newCall(request).execute()
 
@@ -156,7 +192,7 @@ object InAppDownloadManager {
             )
 
             var totalRead = 0L
-            file.outputStream().buffered().use { output ->
+            tmpFile.outputStream().buffered().use { output ->
                 val buffer = ByteArray(8192)
                 var lastReportTime = System.currentTimeMillis()
                 var bytesRead: Int
@@ -179,17 +215,35 @@ object InAppDownloadManager {
             }
 
             if (!coroutineContext.isActive) {
-                file.delete()
+                tmpFile.delete()
                 _downloadState.value = _downloadState.value.copy(
                     status = DownloadStatus.CANCELLED
                 )
                 return
             }
 
+            // 原子化：临时文件重命名为目标文件
+            ensureFileDeletable(file)
+            if (!tmpFile.renameTo(file)) {
+                // renameTo 失败时回退为复制 + 删除
+                LogUtil.w("Download", "renameTo 失败，回退为复制: ${tmpFile.name} -> ${file.name}")
+                tmpFile.inputStream().buffered().use { input ->
+                    file.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(8192)
+                        var bytesRead: Int
+                        while (input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                        }
+                    }
+                }
+                tmpFile.delete()
+            }
+
             _downloadState.value = _downloadState.value.copy(
                 status = DownloadStatus.COMPLETED,
                 downloadedBytes = totalRead,
-                speedBytesPerSec = 0L
+                speedBytesPerSec = 0L,
+                filePath = file.absolutePath
             )
             LogUtil.i("Download", "下载完成: ${_downloadState.value.fileName} (${totalRead} bytes)")
             UniaballRepository.clearCache()
@@ -225,6 +279,8 @@ object InAppDownloadManager {
         }
 
         cleanupPartFiles(file)
+        val tmpFile = File(file.parentFile, "${file.name}.tmp")
+        ensureFileDeletable(tmpFile)
         val partFiles = (0 until MULTI_THREAD_COUNT).map { i ->
             File(file.parentFile, "${file.name}.part$i")
         }
@@ -283,7 +339,7 @@ object InAppDownloadManager {
             }
 
             // 合并分片到目标文件
-            file.outputStream().buffered().use { output ->
+            tmpFile.outputStream().buffered().use { output ->
                 val buffer = ByteArray(8192)
                 for (partFile in partFiles) {
                     if (!partFile.exists()) {
@@ -300,27 +356,47 @@ object InAppDownloadManager {
                 }
             }
 
+            // 原子化：临时文件重命名为目标文件
+            ensureFileDeletable(file)
+            if (!tmpFile.renameTo(file)) {
+                LogUtil.w("Download", "renameTo 失败，回退为复制: ${tmpFile.name} -> ${file.name}")
+                tmpFile.inputStream().buffered().use { input ->
+                    file.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(8192)
+                        var bytesRead: Int
+                        while (input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                        }
+                    }
+                }
+                tmpFile.delete()
+            }
+
             _downloadState.value = _downloadState.value.copy(
                 status = DownloadStatus.COMPLETED,
                 downloadedBytes = contentLength,
-                speedBytesPerSec = 0L
+                speedBytesPerSec = 0L,
+                filePath = file.absolutePath
             )
             LogUtil.i("Download", "多线程下载完成: ${_downloadState.value.fileName} (${contentLength} bytes)")
             UniaballRepository.clearCache()
         } catch (e: CancellationException) {
             file.delete()
+            tmpFile.delete()
             _downloadState.value = _downloadState.value.copy(
                 status = DownloadStatus.CANCELLED
             )
             throw e
         } catch (e: Exception) {
             file.delete()
+            tmpFile.delete()
             _downloadState.value = _downloadState.value.copy(
                 status = DownloadStatus.FAILED,
                 error = e.message ?: "多线程下载失败"
             )
         } finally {
             cleanupPartFiles(file)
+            tmpFile.delete()
         }
     }
 
