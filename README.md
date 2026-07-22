@@ -60,6 +60,11 @@ uniaball-downloader/
 │   │       │   └── repository/       # 数据仓库（缓存、速率限制、镜像）
 │   │       │       └── UniaballRepository.kt
 │   │       ├── ui/
+│   │       │   ├── components/       # 共享 UI 组件
+│   │       │   │   ├── DownloadProgressDialog.kt
+│   │       │   │   ├── DownloadScreenScaffold.kt
+│   │       │   │   ├── StateViews.kt
+│   │       │   │   └── StatusChip.kt
 │   │       │   ├── screens/          # 各页面
 │   │       │   │   ├── HomeScreen.kt
 │   │       │   │   ├── DesktopGluesScreen.kt
@@ -67,11 +72,18 @@ uniaball-downloader/
 │   │       │   │   ├── MobileGlScreen.kt
 │   │       │   │   └── SettingsScreen.kt
 │   │       │   ├── theme/            # Material3 主题
+│   │       │   │   ├── Color.kt
+│   │       │   │   ├── Theme.kt
+│   │       │   │   └── Type.kt
 │   │       │   ├── Destination.kt    # 导航定义
-│   │       │   └── MainScreen.kt     # 主屏幕（导航 + 动画）
+│   │       │   ├── EntranceAnimation.kt  # 入场动画
+│   │       │   ├── MainScreen.kt     # 主屏幕
+│   │       │   └── ScreenTransitions.kt  # 屏幕切换动画
 │   │       ├── util/
-│   │       │   ├── DownloadUtil.kt   # 下载工具
-│   │       │   └── FormatUtil.kt     # 格式化工具
+│   │       │   ├── DownloadUtil.kt       # 下载入口
+│   │       │   ├── FormatUtil.kt         # 格式化工具
+│   │       │   ├── InAppDownloadManager.kt  # 应用内下载
+│   │       │   └── LogUtil.kt            # 日志工具
 │   │       ├── MainActivity.kt
 │   │       └── UniaballApp.kt        # Application 初始化
 │   └── build.gradle.kts
