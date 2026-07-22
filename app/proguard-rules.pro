@@ -1,40 +1,20 @@
-# UniaballDownloader ProGuard 规则
+# Add project specific ProGuard rules here.
+# By default, the flags in this file are appended to flags specified
+# in the default proguard file.
+# For more details, see
+#   http://developer.android.com/guide/developing/tools/proguard.html
 
-# 保留 kotlinx-serialization 序列化类
--keepattributes *Annotation*, InnerClasses
--dontnote kotlinx.serialization.AnnotationsKt
+# If your project uses WebView with JS, uncomment the following
+# and specify the fully qualified class name to the JavaScript interface
+# class:
+#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
+#   public *;
+#}
 
-# kotlinx-serialization: 保留 @Serializable 注解的类及其序列化器
--keep,includedescriptorclasses class com.uniaball.downloader.**$$serializer { *; }
--keepclassmembers class com.uniaball.downloader.** {
-    *** Companion;
-}
--keepclasseswithmembers class com.uniaball.downloader.** {
-    kotlinx.serialization.KSerializer serializer(...);
-}
+# Uncomment this to preserve the line number information for
+# debugging stack traces.
+#-keepattributes SourceFile,LineNumberTable
 
-# OkHttp
--dontwarn okhttp3.**
--dontwarn okio.**
--dontwarn javax.annotation.**
--keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
-
-# Retrofit (if used)
--keepattributes Signature, Exceptions
--keep class retrofit2.** { *; }
--keepclasseswithmembers class * {
-    @retrofit2.http.* <methods>;
-}
-
-# Compose: 保留 Composable 函数（R8 通常自动处理，但显式保留更安全）
--keep class androidx.compose.runtime.** { *; }
--dontwarn androidx.compose.**
-
-# 保留数据模型类（防止 R8 移除反射使用的字段）
--keep class com.uniaball.downloader.data.model.** { *; }
-
-# 保留 FileProvider
--keep class androidx.core.content.FileProvider { *; }
-
-# 保留 OkHttp 拦截器
--keep class com.uniaball.downloader.util.** { *; }
+# If you keep the line number information, uncomment this to
+# hide the original source file name.
+#-renamesourcefileattribute SourceFile

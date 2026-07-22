@@ -16,7 +16,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -348,32 +347,6 @@ object InAppDownloadManager {
 
         try {
             coroutineScope {
-                // 单点汇总协程：每 200ms 读取所有分片的累计字节并发射一次状态，
-                // 避免多个分片线程并发 read-modify-write _downloadState 导致的竞态丢失更新，
-                // 同时将 3 个分片各自 200ms 的发射频率合并为单次 200ms 发射。
-                // coroutineScope 会在所有子 launch 完成后返回，自动取消本汇总协程。
-                launch {
-                    var lastTotal = 0L
-                    var lastTime = System.currentTimeMillis()
-                    while (isActive) {
-                        delay(200)
-                        // 用 idx 避免与外层 for (i in ...) 的循环变量同名遮蔽
-                        var total = 0L
-                        for (idx in 0 until MULTI_THREAD_COUNT) {
-                            total += chunkBytes.get(idx)
-                        }
-                        val now = System.currentTimeMillis()
-                        val elapsed = now - lastTime
-                        val delta = total - lastTotal
-                        val speed = if (elapsed > 0) delta * 1000 / elapsed else 0L
-                        lastTotal = total
-                        lastTime = now
-                        _downloadState.value = _downloadState.value.copy(
-                            downloadedBytes = total,
-                            speedBytesPerSec = speed
-                        )
-                    }
-                }
                 for (i in 0 until MULTI_THREAD_COUNT) {
                     launch {
                         val (rangeStart, rangeEnd) = ranges[i]
@@ -391,13 +364,26 @@ object InAppDownloadManager {
                             partFile.outputStream().buffered().use { output ->
                                 val buffer = ByteArray(8192)
                                 var bytesRead: Int
-                                // 分片线程仅原子更新自身的 chunkBytes 槽位，
-                                // 状态汇总由上方单点汇总协程统一负责。
+                                var lastReportTime = System.currentTimeMillis()
                                 while (isActive) {
                                     bytesRead = source.read(buffer)
                                     if (bytesRead == -1) break
                                     output.write(buffer, 0, bytesRead)
                                     chunkBytes.addAndGet(i, bytesRead.toLong())
+
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastReportTime >= 200) {
+                                        lastReportTime = now
+                                        var total = 0L
+                                        for (j in 0 until MULTI_THREAD_COUNT) {
+                                            total += chunkBytes.get(j)
+                                        }
+                                        val speed = updateSpeed(now, total)
+                                        _downloadState.value = _downloadState.value.copy(
+                                            downloadedBytes = total,
+                                            speedBytesPerSec = speed
+                                        )
+                                    }
                                 }
                             }
                         } finally {

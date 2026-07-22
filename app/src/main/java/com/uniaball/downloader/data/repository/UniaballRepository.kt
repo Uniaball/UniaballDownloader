@@ -8,12 +8,9 @@ import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.model.WorkflowRunPage
 import com.uniaball.downloader.util.LogUtil
-import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
@@ -88,16 +85,16 @@ object UniaballRepository {
     }
 
     // 内存缓存
-    private val releasesCache = ConcurrentHashMap<String, List<GitHubRelease>>()
+    private val releasesCache = mutableMapOf<String, List<GitHubRelease>>()
     @Volatile
     private var mobileGlRunsCacheValue: WorkflowRunPage? = null
     @Volatile
     private var allRunsCache: WorkflowRunPage? = null
-    private val openJdkRunsCache = ConcurrentHashMap<Int, WorkflowRunPage>()
-    private val artifactCache = ConcurrentHashMap<String, ArtifactPage>()
+    private val openJdkRunsCache = mutableMapOf<Int, WorkflowRunPage>()
+    private val artifactCache = mutableMapOf<String, ArtifactPage>()
 
     // 节流时间戳
-    private val lastFetchTimestamps = ConcurrentHashMap<String, Long>()
+    private val lastFetchTimestamps = mutableMapOf<String, Long>()
 
     // SharedPreferences 注入
     private var appContext: Context? = null
@@ -337,17 +334,17 @@ object UniaballRepository {
         artifactCache["${owner}_${repo}_$runId"]
 
     // ===== 磁盘缓存读取（启动时调用） =====
-    suspend fun loadDesktopGluesReleasesFromDisk(): List<GitHubRelease>? =
+    fun loadDesktopGluesReleasesFromDisk(): List<GitHubRelease>? =
         loadFromDisk(KEY_DESKTOPGLUES_RELEASES) ?: releasesCache[KEY_DESKTOPGLUES_RELEASES]
-    suspend fun loadMobileGlRunsFromDisk(): WorkflowRunPage? {
+    fun loadMobileGlRunsFromDisk(): WorkflowRunPage? {
         return loadFromDisk(KEY_MOBILEGL_RUNS) ?: mobileGlRunsCacheValue
     }
-    suspend fun loadAllRunsFromDisk(): WorkflowRunPage? =
+    fun loadAllRunsFromDisk(): WorkflowRunPage? =
         loadFromDisk(KEY_OPENJDK_ALL_RUNS) ?: allRunsCache
-    suspend fun loadOpenJdkRunsFromDisk(jdkVersion: Int): WorkflowRunPage? {
+    fun loadOpenJdkRunsFromDisk(jdkVersion: Int): WorkflowRunPage? {
         return loadFromDisk("$KEY_OPENJDK_RUNS_PREFIX$jdkVersion") ?: openJdkRunsCache[jdkVersion]
     }
-    suspend fun loadArtifactsFromDisk(owner: String, repo: String, runId: Long): ArtifactPage? {
+    fun loadArtifactsFromDisk(owner: String, repo: String, runId: Long): ArtifactPage? {
         return loadFromDisk("$KEY_ARTIFACTS_PREFIX${owner}_${repo}_$runId") ?: artifactCache["${owner}_${repo}_$runId"]
     }
 
@@ -355,20 +352,18 @@ object UniaballRepository {
     private fun prefs(): SharedPreferences? =
         appContext?.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
-    // JSON 反序列化移至 IO 线程，避免阻塞主线程
-    private suspend inline fun <reified T> loadFromDisk(key: String): T? = withContext(Dispatchers.IO) {
-        val p = prefs() ?: return@withContext null
-        val str = p.getString(key, null) ?: return@withContext null
-        try {
+    private inline fun <reified T> loadFromDisk(key: String): T? {
+        val p = prefs() ?: return null
+        val str = p.getString(key, null) ?: return null
+        return try {
             json.decodeFromString(str)
         } catch (e: Exception) {
             null
         }
     }
 
-    // JSON 序列化移至 IO 线程，避免阻塞主线程
-    private suspend inline fun <reified T> saveToDisk(key: String, value: T) = withContext(Dispatchers.IO) {
-        val p = prefs() ?: return@withContext
+    private inline fun <reified T> saveToDisk(key: String, value: T) {
+        val p = prefs() ?: return
         try {
             val str = json.encodeToString(value)
             p.edit().putString(key, str).apply()

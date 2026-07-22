@@ -40,16 +40,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.drawText
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -171,35 +166,12 @@ private fun DownloadingContent(state: DownloadState) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        val percentageTextStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
-        val percentageTextMeasurer = rememberTextMeasurer()
-        val primaryColor = MaterialTheme.colorScheme.primary
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(36.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            // 延迟读取 animatedProgress 到 draw 阶段，避免每帧重组 Text
-            Box(
-                modifier = Modifier.drawWithContent {
-                    val percent = (animatedProgress * 100).toInt()
-                    val text = "$percent%"
-                    val layoutResult = percentageTextMeasurer.measure(
-                        text = AnnotatedString(text),
-                        style = percentageTextStyle
-                    )
-                    drawText(
-                        layoutResult,
-                        color = primaryColor,
-                        topLeft = Offset(
-                            x = (size.width - layoutResult.size.width) / 2f,
-                            y = (size.height - layoutResult.size.height) / 2f
-                        )
-                    )
-                }
-            )
-        }
+        Text(
+            text = "${(animatedProgress * 100).toInt()}%",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
 
         LinearProgressIndicator(
             progress = { animatedProgress },

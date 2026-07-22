@@ -50,6 +50,7 @@ import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.ui.components.DownloadProgressDialog
+import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
@@ -107,50 +108,49 @@ class MobileGlViewModel : ViewModel() {
 
     private fun applyFilter(): MobileGlUiState {
         val filteredArtifacts = UniaballRepository.filterApkOnly(allItems.map { it.artifact })
-        // 转为 Set 加速 O(1) 查找，避免 O(n*m) 遍历
-        val filteredSet = filteredArtifacts.toSet()
-        val filtered = allItems.filter { it.artifact in filteredSet }
+        val filtered = allItems.filter { it.artifact in filteredArtifacts }
         return if (filtered.isEmpty()) MobileGlUiState.Empty else MobileGlUiState.Success(filtered)
     }
 
     fun load() {
-        viewModelScope.launch {
-            var hasContent = _uiState.value is MobileGlUiState.Success
-            if (!hasContent) {
-                // 优先从内存/磁盘缓存读取 artifacts，若有立即设 Success 态并标记 hasContent=true
-                // JSON 反序列化已移至 IO 线程
-                val cached = UniaballRepository.loadMobileGlRunsFromDisk()
-                if (cached != null && cached.workflowRuns.isNotEmpty()) {
-                    val runs = cached.workflowRuns.take(5)
-                    val cachedItems = runs.mapNotNull { run ->
-                        val ap = UniaballRepository.loadArtifactsFromDisk(
-                            UniaballRepository.MOBILEGL_OWNER,
-                            UniaballRepository.MOBILEGL_REPO,
-                            run.id
-                        ) ?: return@mapNotNull null
-                        ap.artifacts.map { artifact -> MobileGlBuildItem(artifact, run) }
-                    }.flatten().sortedByDescending { it.artifact.createdAt }
-                    if (cachedItems.isNotEmpty()) {
-                        allItems = cachedItems
-                        _uiState.value = applyFilter()
-                        hasContent = true
-                    } else {
-                        _uiState.value = MobileGlUiState.Loading
-                    }
+        var hasContent = _uiState.value is MobileGlUiState.Success
+        if (!hasContent) {
+            // 优先从内存/磁盘缓存读取 artifacts，若有立即设 Success 态并标记 hasContent=true
+            val cached = UniaballRepository.loadMobileGlRunsFromDisk()
+            if (cached != null && cached.workflowRuns.isNotEmpty()) {
+                val runs = cached.workflowRuns.take(5)
+                val cachedItems = runs.mapNotNull { run ->
+                    val ap = UniaballRepository.loadArtifactsFromDisk(
+                        UniaballRepository.MOBILEGL_OWNER,
+                        UniaballRepository.MOBILEGL_REPO,
+                        run.id
+                    ) ?: return@mapNotNull null
+                    ap.artifacts.map { artifact -> MobileGlBuildItem(artifact, run) }
+                }.flatten().sortedByDescending { it.artifact.createdAt }
+                if (cachedItems.isNotEmpty()) {
+                    allItems = cachedItems
+                    _uiState.value = applyFilter()
+                    hasContent = true
                 } else {
                     _uiState.value = MobileGlUiState.Loading
                 }
             } else {
-                _isRefreshing.value = true
+                _uiState.value = MobileGlUiState.Loading
             }
+        } else {
+            _isRefreshing.value = true
+        }
 
-            // 节流：30 秒内不重复请求
-            if (hasContent && UniaballRepository.isFresh("mobilegl_runs")) {
+        // 节流：30 秒内不重复请求
+        if (hasContent && UniaballRepository.isFresh("mobilegl_runs")) {
+            viewModelScope.launch {
                 _snackbar.emit("请稍候再刷新")
                 _isRefreshing.value = false
-                return@launch
             }
+            return
+        }
 
+        viewModelScope.launch {
             try {
                 val runsPage = UniaballRepository.listMobileGlRuns()
                 val runs = runsPage.workflowRuns.take(5)
@@ -324,7 +324,7 @@ fun MobileGlScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 itemsIndexed(items = target.items, key = { _, it -> it.artifact.id }, contentType = { _, _ -> "mobilegl_build" }) { index, item ->
-                                    MobileGlBuildCard(item, modifier = Modifier.animateItem())
+                                    MobileGlBuildCard(item, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
                                 }
                             }
                         }

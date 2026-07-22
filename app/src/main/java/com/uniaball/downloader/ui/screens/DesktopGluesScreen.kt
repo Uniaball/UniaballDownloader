@@ -52,6 +52,7 @@ import com.uniaball.downloader.data.model.GitHubAsset
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.ui.components.DownloadProgressDialog
+import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
@@ -84,26 +85,27 @@ class DesktopGluesViewModel : ViewModel() {
     init { load() }
 
     fun load() {
-        viewModelScope.launch {
-            var hasContent = _uiState.value is DesktopGluesUiState.Success
-            if (!hasContent) {
-                // 优先从磁盘缓存读取 releases，若有立即设 Success 态
-                // JSON 反序列化已移至 IO 线程
-                val cached = UniaballRepository.loadDesktopGluesReleasesFromDisk()
-                if (cached != null && cached.isNotEmpty()) {
-                    _uiState.value = DesktopGluesUiState.Success(cached)
-                    hasContent = true
-                } else {
-                    _uiState.value = DesktopGluesUiState.Loading
-                }
+        var hasContent = _uiState.value is DesktopGluesUiState.Success
+        if (!hasContent) {
+            // 优先从磁盘缓存读取 releases，若有立即设 Success 态
+            val cached = UniaballRepository.loadDesktopGluesReleasesFromDisk()
+            if (cached != null && cached.isNotEmpty()) {
+                _uiState.value = DesktopGluesUiState.Success(cached)
+                hasContent = true
+            } else {
+                _uiState.value = DesktopGluesUiState.Loading
             }
+        }
 
-            // 节流
-            if (hasContent && UniaballRepository.isFresh("desktopglues_releases")) {
+        // 节流
+        if (hasContent && UniaballRepository.isFresh("desktopglues_releases")) {
+            viewModelScope.launch {
                 _snackbar.emit("请稍候再刷新")
-                return@launch
             }
+            return
+        }
 
+        viewModelScope.launch {
             try {
                 val releases = UniaballRepository.listDesktopGluesReleases()
                 if (releases.isEmpty()) {
@@ -223,7 +225,7 @@ private fun SuccessView(releases: List<GitHubRelease>, modifier: Modifier = Modi
             )
         }
         itemsIndexed(items = releases, key = { _, it -> it.id }, contentType = { _, _ -> "desktopglues_release" }) { index, release ->
-            ReleaseCard(release = release, modifier = Modifier.animateItem())
+            ReleaseCard(release = release, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
         }
     }
 }
