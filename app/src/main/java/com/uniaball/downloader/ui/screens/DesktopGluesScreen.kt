@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
@@ -51,6 +52,7 @@ import com.uniaball.downloader.data.model.GitHubAsset
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.ui.components.DownloadProgressDialog
+import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
@@ -222,7 +224,9 @@ private fun SuccessView(releases: List<GitHubRelease>, modifier: Modifier = Modi
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        items(items = releases, key = { it.id }, contentType = { "desktopglues_release" }) { ReleaseCard(release = it, modifier = Modifier.animateItem()) }
+        itemsIndexed(items = releases, key = { _, it -> it.id }, contentType = { _, _ -> "desktopglues_release" }) { index, release ->
+            ReleaseCard(release = release, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
+        }
     }
 }
 

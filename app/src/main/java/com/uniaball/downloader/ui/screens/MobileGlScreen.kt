@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Inbox
@@ -49,6 +50,7 @@ import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.ui.components.DownloadProgressDialog
+import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
@@ -321,8 +323,8 @@ fun MobileGlScreen(
                                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(items = target.items, key = { it.artifact.id }, contentType = { "mobilegl_build" }) { item ->
-                                    MobileGlBuildCard(item, modifier = Modifier.animateItem())
+                                itemsIndexed(items = target.items, key = { _, it -> it.artifact.id }, contentType = { _, _ -> "mobilegl_build" }) { index, item ->
+                                    MobileGlBuildCard(item, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
                                 }
                             }
                         }

@@ -160,8 +160,8 @@ object InAppDownloadManager {
      * 下载完成后通过 MediaStore 将文件发布到公共 Downloads/UniaballDownloader 目录。
      * 仅 API 29+ 可用；失败时记录警告日志，不影响下载成功状态。
      */
-    private fun publishToDownloads(file: File, fileName: String) {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return
+    private fun publishToDownloads(file: File, fileName: String): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return false
         try {
             val resolver = appContext.contentResolver
             val mimeType = getMimeType(fileName)
@@ -173,7 +173,7 @@ object InAppDownloadManager {
             val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             if (uri == null) {
                 LogUtil.w("Download", "MediaStore 插入失败，跳过发布到公共 Downloads")
-                return
+                return false
             }
             resolver.openOutputStream(uri)?.use { output ->
                 file.inputStream().buffered().use { input ->
@@ -184,9 +184,12 @@ object InAppDownloadManager {
                     }
                 }
             }
+            file.delete()
             LogUtil.i("Download", "已发布到公共 Downloads: $fileName")
+            return true
         } catch (e: Exception) {
             LogUtil.w("Download", "发布到公共 Downloads 失败: ${e.message}")
+            return false
         }
     }
 
@@ -472,25 +475,49 @@ object InAppDownloadManager {
         val state = _downloadState.value
         if (state.status != DownloadStatus.COMPLETED || state.filePath.isBlank()) return
         val file = File(state.filePath)
-        if (!file.exists()) {
-            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+        val mimeType = getMimeType(state.fileName)
+
+        if (file.exists()) {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                context.startActivity(Intent.createChooser(intent, "查看文件"))
+            }.onFailure {
+                Toast.makeText(context, "无法打开文件，文件路径：${file.absolutePath}", Toast.LENGTH_LONG).show()
+            }
             return
         }
 
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val mimeType = getMimeType(state.fileName)
-
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, mimeType)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // 私有文件不存在（已发布到公共 Downloads 后被清理），从 MediaStore 查询
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(android.provider.MediaStore.Downloads._ID)
+            val selection = "${android.provider.MediaStore.Downloads.DISPLAY_NAME} = ?"
+            val selectionArgs = arrayOf(state.fileName)
+            appContext.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idColumn = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Downloads._ID)
+                    val uri = android.content.ContentUris.withAppendedId(collection, cursor.getLong(idColumn))
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, mimeType)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching {
+                        context.startActivity(Intent.createChooser(intent, "查看文件"))
+                    }.onFailure {
+                        Toast.makeText(context, "无法打开文件：${state.fileName}", Toast.LENGTH_LONG).show()
+                    }
+                    return
+                }
+            }
         }
 
-        runCatching {
-            context.startActivity(Intent.createChooser(intent, "查看文件"))
-        }.onFailure {
-            Toast.makeText(context, "无法打开文件，文件路径：${file.absolutePath}", Toast.LENGTH_LONG).show()
-        }
+        Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
     }
 
     private fun getMimeType(fileName: String): String {

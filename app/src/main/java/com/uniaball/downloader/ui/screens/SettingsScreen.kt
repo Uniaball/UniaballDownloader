@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.uniaball.downloader.BuildConfig
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.util.LogUtil
+import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.util.formatSize
 
 @Composable
@@ -68,7 +69,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         )
 
         Card(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 0)
         ) {
             Row(
                 modifier = Modifier
@@ -105,7 +106,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         }
 
         Card(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 50)
         ) {
             Row(
                 modifier = Modifier
@@ -142,7 +143,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         }
 
         Card(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 100)
         ) {
             Row(
                 modifier = Modifier
@@ -194,7 +195,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         )
 
         Card(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 150)
         ) {
             Row(
                 modifier = Modifier
@@ -271,7 +272,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         )
 
         Card(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 200)
         ) {
             Row(
                 modifier = Modifier
@@ -332,7 +333,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     context.startActivity(intent)
                 }
             },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 250)
         ) {
             Row(
                 modifier = Modifier

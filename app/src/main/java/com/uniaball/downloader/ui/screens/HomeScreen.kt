@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.uniaball.downloader.ui.SubScreen
+import com.uniaball.downloader.ui.entranceAnimation
 
 @Composable
 fun HomeScreen(
@@ -49,7 +50,7 @@ fun HomeScreen(
 
         Card(
             onClick = { onNavigate(SubScreen.DesktopGlues) },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 0)
         ) {
             Row(
                 modifier = Modifier
@@ -81,7 +82,7 @@ fun HomeScreen(
 
         Card(
             onClick = { onNavigate(SubScreen.OpenJdk) },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 60)
         ) {
             Row(
                 modifier = Modifier
@@ -113,7 +114,7 @@ fun HomeScreen(
 
         Card(
             onClick = { onNavigate(SubScreen.MobileGl) },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 120)
         ) {
             Row(
                 modifier = Modifier

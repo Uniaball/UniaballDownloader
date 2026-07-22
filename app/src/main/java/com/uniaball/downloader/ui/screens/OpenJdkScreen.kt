@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -48,6 +49,7 @@ import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.model.WorkflowRunPage
 import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.ui.components.DownloadProgressDialog
+import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.ui.screenTransitionSpec
 import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
@@ -452,8 +454,8 @@ private fun BuildsList(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(items, key = { it.artifact.id }, contentType = { "openjdk_build" }) { item ->
-            BuildCard(item = item, onDownload = onDownload, modifier = Modifier.animateItem())
+        itemsIndexed(items, key = { _, it -> it.artifact.id }, contentType = { _, _ -> "openjdk_build" }) { index, item ->
+            BuildCard(item = item, onDownload = onDownload, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
         }
     }
 }
