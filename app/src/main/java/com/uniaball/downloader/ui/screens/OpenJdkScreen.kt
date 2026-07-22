@@ -452,7 +452,7 @@ private fun BuildsList(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(items, key = { it.artifact.id }) { item ->
+        items(items, key = { it.artifact.id }, contentType = { "openjdk_build" }) { item ->
             BuildCard(item = item, onDownload = onDownload, modifier = Modifier.animateItem())
         }
     }

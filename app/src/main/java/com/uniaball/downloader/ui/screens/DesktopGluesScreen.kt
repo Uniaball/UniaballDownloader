@@ -222,7 +222,7 @@ private fun SuccessView(releases: List<GitHubRelease>, modifier: Modifier = Modi
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        items(items = releases, key = { it.id }) { ReleaseCard(release = it, modifier = Modifier.animateItem()) }
+        items(items = releases, key = { it.id }, contentType = { "desktopglues_release" }) { ReleaseCard(release = it, modifier = Modifier.animateItem()) }
     }
 }
 

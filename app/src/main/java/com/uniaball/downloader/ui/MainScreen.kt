@@ -2,12 +2,6 @@ package com.uniaball.downloader.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -83,15 +77,7 @@ fun MainScreen() {
         AnimatedContent(
             targetState = subScreen ?: current,
             modifier = Modifier.fillMaxSize().padding(padding),
-            transitionSpec = {
-                fadeIn(animationSpec = tween(200)) + slideInHorizontally(
-                    animationSpec = tween(200),
-                    initialOffsetX = { it / 8 }
-                ) togetherWith fadeOut(animationSpec = tween(200)) + slideOutHorizontally(
-                    animationSpec = tween(200),
-                    targetOffsetX = { -it / 8 }
-                )
-            },
+            transitionSpec = { screenTransitionSpec() },
             label = "screen-transition"
         ) { target ->
             when (target) {

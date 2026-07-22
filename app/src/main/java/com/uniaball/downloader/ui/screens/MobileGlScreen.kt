@@ -105,12 +105,8 @@ class MobileGlViewModel : ViewModel() {
     }
 
     private fun applyFilter(): MobileGlUiState {
-        val apkOnly = UniaballRepository.isMobileGlApkOnly.value
-        val filtered = if (apkOnly) {
-            allItems.filter { it.artifact.name.endsWith(".apk", ignoreCase = true) }
-        } else {
-            allItems
-        }
+        val filteredArtifacts = UniaballRepository.filterApkOnly(allItems.map { it.artifact })
+        val filtered = allItems.filter { it.artifact in filteredArtifacts }
         return if (filtered.isEmpty()) MobileGlUiState.Empty else MobileGlUiState.Success(filtered)
     }
 
@@ -325,7 +321,7 @@ fun MobileGlScreen(
                                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(items = target.items, key = { it.artifact.id }) { item ->
+                                items(items = target.items, key = { it.artifact.id }, contentType = { "mobilegl_build" }) { item ->
                                     MobileGlBuildCard(item, modifier = Modifier.animateItem())
                                 }
                             }

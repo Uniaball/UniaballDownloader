@@ -43,6 +43,7 @@ object UniaballRepository {
     // 网页版用于过滤 run.name 的关键字
     const val RUN_NAME_MOBILEGL = "MobileGL APK"
     const val NIGHTLY_LINK_BASE = "https://nightly.link/"
+    const val APK_EXCLUDE_KEYWORD = "trace"
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
 
@@ -138,12 +139,16 @@ object UniaballRepository {
 
     /**
      * 根据 [isMobileGlApkOnly] 开关过滤 artifacts：
-     *   - 开关开启（默认）：仅保留 name 以 ".apk" 结尾（大小写不敏感）的 artifact
+     *   - 开关开启（默认）：仅保留 name 以 ".apk" 结尾（大小写不敏感）的 artifact，
+     *     并排除 name 中包含 "trace"（大小写不敏感，即 [APK_EXCLUDE_KEYWORD]）的 artifact
      *   - 开关关闭：返回原始列表
      */
     fun filterApkOnly(artifacts: List<Artifact>): List<Artifact> {
         if (!_isMobileGlApkOnly.value) return artifacts
-        return artifacts.filter { it.name.endsWith(".apk", ignoreCase = true) }
+        return artifacts.filter { artifact ->
+            artifact.name.endsWith(".apk", ignoreCase = true) &&
+                !artifact.name.contains(APK_EXCLUDE_KEYWORD, ignoreCase = true)
+        }
     }
 
     private fun checkRateLimit() {

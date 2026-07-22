@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -126,7 +127,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "过滤 MobileGL 工作流中的 trace 等非 APK 产物",
+                        text = "过滤非 APK 产物及名称含 trace 的 APK",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -142,7 +143,10 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
         // ===== 缓存管理 =====
         var showConfirmDialog by remember { mutableStateOf(false) }
-        var cacheSize by remember { mutableStateOf(UniaballRepository.getCacheSize()) }
+        var cacheSize by remember { mutableStateOf(0L) }
+        LaunchedEffect(Unit) {
+            cacheSize = UniaballRepository.getCacheSize()
+        }
 
         Text(
             text = "缓存管理",
