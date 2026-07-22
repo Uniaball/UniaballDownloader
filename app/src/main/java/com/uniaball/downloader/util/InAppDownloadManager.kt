@@ -6,6 +6,7 @@ import android.os.Environment
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -159,7 +160,7 @@ object InAppDownloadManager {
                 val buffer = ByteArray(8192)
                 var lastReportTime = System.currentTimeMillis()
                 var bytesRead: Int
-                while (isActive) {
+                while (coroutineContext.isActive) {
                     bytesRead = source.read(buffer)
                     if (bytesRead == -1) break
                     output.write(buffer, 0, bytesRead)
@@ -177,7 +178,7 @@ object InAppDownloadManager {
                 }
             }
 
-            if (!isActive) {
+            if (!coroutineContext.isActive) {
                 file.delete()
                 _downloadState.value = _downloadState.value.copy(
                     status = DownloadStatus.CANCELLED
