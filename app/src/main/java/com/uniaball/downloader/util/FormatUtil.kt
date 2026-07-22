@@ -1,5 +1,12 @@
 package com.uniaball.downloader.util
 
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+private val TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+private val SYSTEM_ZONE = ZoneId.systemDefault()
+
 fun formatSize(bytes: Long): String {
     if (bytes <= 0) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB", "TB")
@@ -9,7 +16,7 @@ fun formatSize(bytes: Long): String {
         size /= 1024
         unitIndex++
     }
-    return String.format("%.1f %s", size, units[unitIndex])
+    return String.format(Locale.US, "%.1f %s", size, units[unitIndex])
 }
 
 /**
@@ -20,8 +27,7 @@ fun formatTime(iso: String): String {
     if (iso.isBlank()) return ""
     return runCatching {
         val input = java.time.OffsetDateTime.parse(iso)
-        val local = input.atZoneSameInstant(java.time.ZoneId.systemDefault())
-        val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-        local.format(formatter)
+        val local = input.atZoneSameInstant(SYSTEM_ZONE)
+        local.format(TIME_FORMATTER)
     }.getOrElse { iso }
 }

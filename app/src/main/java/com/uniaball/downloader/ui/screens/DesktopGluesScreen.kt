@@ -2,40 +2,31 @@ package com.uniaball.downloader.ui.screens
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -44,27 +35,25 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.uniaball.downloader.data.model.GitHubAsset
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.repository.UniaballRepository
-import com.uniaball.downloader.ui.components.DownloadProgressDialog
-import com.uniaball.downloader.ui.entranceAnimation
+import com.uniaball.downloader.ui.components.BaseDownloadViewModel
+import com.uniaball.downloader.ui.components.CollectSnackbar
+import com.uniaball.downloader.ui.components.DownloadScreenScaffold
+import com.uniaball.downloader.ui.components.StateEmptyView
+import com.uniaball.downloader.ui.components.StateErrorView
+import com.uniaball.downloader.ui.components.StateLoadingView
 import com.uniaball.downloader.ui.screenTransitionSpec
-import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
-import com.uniaball.downloader.util.InAppDownloadManager
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
 import dev.jeziellago.compose.markdowntext.MarkdownText
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -75,12 +64,9 @@ sealed interface DesktopGluesUiState {
     data object Empty : DesktopGluesUiState
 }
 
-class DesktopGluesViewModel : ViewModel() {
+class DesktopGluesViewModel : BaseDownloadViewModel() {
     private val _uiState = MutableStateFlow<DesktopGluesUiState>(DesktopGluesUiState.Loading)
     val uiState: StateFlow<DesktopGluesUiState> = _uiState.asStateFlow()
-
-    private val _snackbar = MutableSharedFlow<String>()
-    val snackbar: SharedFlow<String> = _snackbar.asSharedFlow()
 
     init { load() }
 
@@ -117,18 +103,12 @@ class DesktopGluesViewModel : ViewModel() {
                 } else {
                     _uiState.value = DesktopGluesUiState.Success(releases)
                 }
-            } catch (e: com.uniaball.downloader.data.repository.RateLimitedException) {
-                if (!hasContent) {
-                    _uiState.value = DesktopGluesUiState.Error(e.message ?: "GitHub API 速率限制")
-                } else {
-                    _snackbar.emit(e.message ?: "GitHub API 速率限制")
-                }
             } catch (e: Exception) {
-                if (!hasContent) {
-                    _uiState.value = DesktopGluesUiState.Error(e.message ?: "加载失败")
-                } else {
-                    _snackbar.emit(e.message ?: "刷新失败")
-                }
+                handleLoadException(
+                    e,
+                    hasContent = hasContent,
+                    setError = { msg -> _uiState.value = DesktopGluesUiState.Error(msg) }
+                )
             }
         }
     }
@@ -139,18 +119,12 @@ fun DesktopGluesScreen(modifier: Modifier = Modifier) {
     val viewModel: DesktopGluesViewModel = viewModel { DesktopGluesViewModel() }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val downloadState by InAppDownloadManager.downloadState.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.snackbar.collect { msg ->
-            snackbarHostState.showSnackbar(msg)
-        }
-    }
+    viewModel.CollectSnackbar(snackbarHostState)
 
-    Scaffold(
+    DownloadScreenScaffold(
         modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        snackbarHostState = snackbarHostState
     ) { padding ->
         AnimatedContent(
             targetState = state,
@@ -159,53 +133,11 @@ fun DesktopGluesScreen(modifier: Modifier = Modifier) {
             label = "desktopglues-state"
         ) { target ->
             when (target) {
-                DesktopGluesUiState.Loading -> Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) { CircularProgressIndicator() }
-                is DesktopGluesUiState.Error -> ErrorView(target.message, { viewModel.load() }, Modifier.fillMaxSize())
-                DesktopGluesUiState.Empty -> EmptyView(Modifier.fillMaxSize())
+                DesktopGluesUiState.Loading -> StateLoadingView()
+                is DesktopGluesUiState.Error -> StateErrorView(target.message, { viewModel.load() })
+                DesktopGluesUiState.Empty -> StateEmptyView("暂无 Release")
                 is DesktopGluesUiState.Success -> SuccessView(target.releases, Modifier.fillMaxSize())
             }
-        }
-    }
-
-    if (downloadState.status != DownloadStatus.IDLE) {
-        DownloadProgressDialog(
-            state = downloadState,
-            onDismiss = { InAppDownloadManager.resetState() }
-        )
-    }
-}
-
-@Composable
-private fun ErrorView(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text("加载失败", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(onClick = onRetry) { Text("重试") }
-        }
-    }
-}
-
-@Composable
-private fun EmptyView(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.CloudDownload,
-                contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text("暂无 Release", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -224,8 +156,8 @@ private fun SuccessView(releases: List<GitHubRelease>, modifier: Modifier = Modi
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        itemsIndexed(items = releases, key = { _, it -> it.id }, contentType = { _, _ -> "desktopglues_release" }) { index, release ->
-            ReleaseCard(release = release, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
+        itemsIndexed(items = releases, key = { _, it -> it.id }, contentType = { _, _ -> "desktopglues_release" }) { _, release ->
+            ReleaseCard(release = release, modifier = Modifier.animateItem())
         }
     }
 }

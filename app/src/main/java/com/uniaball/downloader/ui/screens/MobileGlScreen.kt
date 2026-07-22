@@ -2,68 +2,52 @@ package com.uniaball.downloader.ui.screens
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Inbox
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.uniaball.downloader.data.model.Artifact
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.repository.UniaballRepository
-import com.uniaball.downloader.ui.components.DownloadProgressDialog
-import com.uniaball.downloader.ui.entranceAnimation
+import com.uniaball.downloader.ui.components.BaseDownloadViewModel
+import com.uniaball.downloader.ui.components.CollectSnackbar
+import com.uniaball.downloader.ui.components.DownloadScreenScaffold
+import com.uniaball.downloader.ui.components.StateEmptyView
+import com.uniaball.downloader.ui.components.StateErrorView
+import com.uniaball.downloader.ui.components.StateLoadingView
+import com.uniaball.downloader.ui.components.StatusChip
 import com.uniaball.downloader.ui.screenTransitionSpec
-import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
-import com.uniaball.downloader.util.InAppDownloadManager
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -83,16 +67,14 @@ data class MobileGlBuildItem(
 
 // ===== ViewModel =====
 
-class MobileGlViewModel : ViewModel() {
+class MobileGlViewModel : BaseDownloadViewModel() {
     private val _uiState = MutableStateFlow<MobileGlUiState>(MobileGlUiState.Loading)
     val uiState: StateFlow<MobileGlUiState> = _uiState.asStateFlow()
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
-    private val _snackbar = MutableSharedFlow<String>()
-    val snackbar: SharedFlow<String> = _snackbar.asSharedFlow()
-
+    @Volatile
     private var allItems: List<MobileGlBuildItem> = emptyList()
 
     init {
@@ -107,7 +89,7 @@ class MobileGlViewModel : ViewModel() {
     }
 
     private fun applyFilter(): MobileGlUiState {
-        val filteredArtifacts = UniaballRepository.filterApkOnly(allItems.map { it.artifact })
+        val filteredArtifacts = UniaballRepository.filterApkOnly(allItems.map { it.artifact }).toSet()
         val filtered = allItems.filter { it.artifact in filteredArtifacts }
         return if (filtered.isEmpty()) MobileGlUiState.Empty else MobileGlUiState.Success(filtered)
     }
@@ -183,18 +165,12 @@ class MobileGlViewModel : ViewModel() {
                     allItems = items
                     _uiState.value = applyFilter()
                 }
-            } catch (e: com.uniaball.downloader.data.repository.RateLimitedException) {
-                if (!hasContent) {
-                    _uiState.value = MobileGlUiState.Error(e.message ?: "GitHub API 速率限制")
-                } else {
-                    _snackbar.emit(e.message ?: "GitHub API 速率限制")
-                }
             } catch (e: Exception) {
-                if (!hasContent) {
-                    _uiState.value = MobileGlUiState.Error(e.message ?: "加载失败")
-                } else {
-                    _snackbar.emit(e.message ?: "刷新失败")
-                }
+                handleLoadException(
+                    e,
+                    hasContent = hasContent,
+                    setError = { msg -> _uiState.value = MobileGlUiState.Error(msg) }
+                )
             } finally {
                 _isRefreshing.value = false
             }
@@ -213,18 +189,12 @@ fun MobileGlScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val downloadState by InAppDownloadManager.downloadState.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.snackbar.collect { msg ->
-            snackbarHostState.showSnackbar(msg)
-        }
-    }
+    viewModel.CollectSnackbar(snackbarHostState)
 
-    Scaffold(
+    DownloadScreenScaffold(
         modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        snackbarHostState = snackbarHostState
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             Column(modifier = Modifier
@@ -272,59 +242,17 @@ fun MobileGlScreen(
                     label = "mobilegl-state"
                 ) { target ->
                     when (target) {
-                        is MobileGlUiState.Loading -> {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator()
-                            }
-                        }
-                        is MobileGlUiState.Error -> {
-                            Column(
-                                modifier = Modifier.fillMaxSize().padding(16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = target.message,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(onClick = { viewModel.load() }) {
-                                    Text("重试")
-                                }
-                            }
-                        }
-                        is MobileGlUiState.Empty -> {
-                            Column(
-                                modifier = Modifier.fillMaxSize().padding(16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Inbox,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(48.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = "暂无 APK 构建文件",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
+                        is MobileGlUiState.Loading -> StateLoadingView()
+                        is MobileGlUiState.Error -> StateErrorView(target.message, { viewModel.load() })
+                        is MobileGlUiState.Empty -> StateEmptyView("暂无 APK 构建文件")
                         is MobileGlUiState.Success -> {
                             LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                itemsIndexed(items = target.items, key = { _, it -> it.artifact.id }, contentType = { _, _ -> "mobilegl_build" }) { index, item ->
-                                    MobileGlBuildCard(item, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
+                                itemsIndexed(items = target.items, key = { _, it -> it.artifact.id }, contentType = { _, _ -> "mobilegl_build" }) { _, item ->
+                                    MobileGlBuildCard(item, modifier = Modifier.animateItem())
                                 }
                             }
                         }
@@ -332,13 +260,6 @@ fun MobileGlScreen(
                 }
             }
         }
-    }
-
-    if (downloadState.status != DownloadStatus.IDLE) {
-        DownloadProgressDialog(
-            state = downloadState,
-            onDismiss = { InAppDownloadManager.resetState() }
-        )
     }
 }
 
@@ -400,35 +321,5 @@ private fun MobileGlBuildCard(item: MobileGlBuildItem, modifier: Modifier = Modi
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun StatusChip(conclusion: String?) {
-    val (text, containerColor, contentColor) = when (conclusion) {
-        "success" -> Triple("成功", Color(0xFF4CAF50).copy(alpha = 0.2f), Color(0xFF2E7D32))
-        "failure" -> Triple(
-            "失败",
-            MaterialTheme.colorScheme.errorContainer,
-            MaterialTheme.colorScheme.onErrorContainer
-        )
-        "cancelled" -> Triple(
-            "已取消",
-            MaterialTheme.colorScheme.surfaceVariant,
-            MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        else -> Triple("运行中", Color(0xFFFFC107).copy(alpha = 0.25f), Color(0xFFF57C00))
-    }
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = containerColor
-    ) {
-        Text(
-            text = text,
-            color = contentColor,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-        )
     }
 }

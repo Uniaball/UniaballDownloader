@@ -1,7 +1,6 @@
 package com.uniaball.downloader.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,8 +20,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.uniaball.downloader.ui.SubScreen
@@ -33,6 +38,9 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     onNavigate: (SubScreen) -> Unit
 ) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -48,99 +56,72 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        Card(
+        HomeEntryCard(
+            icon = Icons.Filled.Build,
+            title = "DesktopGlues Releases",
+            subtitle = "DesktopGlues 项目构建下载",
             onClick = { onNavigate(SubScreen.DesktopGlues) },
-            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 0)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Build,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column {
-                    Text(
-                        text = "DesktopGlues Releases",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "DesktopGlues 项目构建下载",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
+            delayMillis = 0,
+            visible = visible
+        )
 
-        Card(
+        HomeEntryCard(
+            icon = Icons.Filled.Code,
+            title = "OpenJDK-Android",
+            subtitle = "GitHub Actions 构建下载，OpenJDK 17/21/25/26/27/28",
             onClick = { onNavigate(SubScreen.OpenJdk) },
-            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 60)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Code,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column {
-                    Text(
-                        text = "OpenJDK-Android",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "GitHub Actions 构建下载，OpenJDK 17/21/25/26/27/28",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
+            delayMillis = 60,
+            visible = visible
+        )
 
-        Card(
+        HomeEntryCard(
+            icon = Icons.Filled.Apps,
+            title = "MobileGL Actions",
+            subtitle = "MobileGL APK 构建，来自 GitHub Actions",
             onClick = { onNavigate(SubScreen.MobileGl) },
-            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 120)
+            delayMillis = 120,
+            visible = visible
+        )
+    }
+}
+
+@Composable
+private fun HomeEntryCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    delayMillis: Int,
+    visible: Boolean
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().entranceAnimation(visible = visible, delayMillis = delayMillis)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Apps,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
                 )
-                Column {
-                    Text(
-                        text = "MobileGL Actions",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "MobileGL APK 构建，来自 GitHub Actions",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

@@ -201,15 +201,60 @@ object InAppDownloadManager {
         }
     }
 
+    /**
+     * 选择下载用的临时文件：优先 defaultTmpFile，经 ensureFileDeletable 校验后
+     * 若不可用则回退到带时间戳的 fallback。单/多线程路径共用。
+     */
+    private fun tmpFileFor(targetFile: File): File {
+        val defaultTmpFile = File(targetFile.parentFile, "${targetFile.name}.tmp")
+        return if (ensureFileDeletable(defaultTmpFile)) {
+            defaultTmpFile
+        } else {
+            File(targetFile.parentFile, "${targetFile.name}.${System.currentTimeMillis()}.tmp")
+        }
+    }
+
+    /**
+     * 原子化落盘：优先 rename，失败则回退为流式复制 + 删除临时文件。单/多线程路径共用。
+     */
+    private fun atomicMoveOrCopy(tmp: File, target: File) {
+        if (ensureFileDeletable(target) && tmp.renameTo(target)) {
+            LogUtil.i("Download", "文件重命名成功: ${tmp.name} -> ${target.name}")
+        } else {
+            LogUtil.w("Download", "renameTo 失败，回退为复制: ${tmp.name} -> ${target.name}")
+            tmp.inputStream().buffered().use { input ->
+                target.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                    }
+                }
+            }
+            tmp.delete()
+        }
+    }
+
+    /**
+     * 200ms 节流的进度上报：更新速度采样并发射新的下载状态。
+     * 接收当前累计已下载字节，未到节流间隔则返回原 lastReportTime，否则返回本次时间戳。
+     * 单/多线程路径共用（多线程由调用方先累加各分片得到累计字节）。
+     */
+    private fun reportProgress(downloadedBytes: Long, lastReportTime: Long): Long {
+        val now = System.currentTimeMillis()
+        if (now - lastReportTime < 200) return lastReportTime
+        val speed = updateSpeed(now, downloadedBytes)
+        _downloadState.value = _downloadState.value.copy(
+            downloadedBytes = downloadedBytes,
+            speedBytesPerSec = speed
+        )
+        return now
+    }
+
     // 单线程下载（fallback 路径，行为与原实现保持一致）
     private suspend fun downloadSingleThread(url: String, file: File) {
         var response: okhttp3.Response? = null
-        val defaultTmpFile = File(file.parentFile, "${file.name}.tmp")
-        val tmpFile = if (ensureFileDeletable(defaultTmpFile)) {
-            defaultTmpFile
-        } else {
-            File(file.parentFile, "${file.name}.${System.currentTimeMillis()}.tmp")
-        }
+        val tmpFile = tmpFileFor(file)
         try {
             val request = Request.Builder().url(url).build()
             response = client.newCall(request).execute()
@@ -250,15 +295,7 @@ object InAppDownloadManager {
                     output.write(buffer, 0, bytesRead)
                     totalRead += bytesRead
 
-                    val now = System.currentTimeMillis()
-                    if (now - lastReportTime >= 200) {
-                        lastReportTime = now
-                        val speed = updateSpeed(now, totalRead)
-                        _downloadState.value = _downloadState.value.copy(
-                            downloadedBytes = totalRead,
-                            speedBytesPerSec = speed
-                        )
-                    }
+                    lastReportTime = reportProgress(totalRead, lastReportTime)
                 }
             }
 
@@ -271,22 +308,7 @@ object InAppDownloadManager {
             }
 
             // 原子化：临时文件重命名为目标文件
-            if (ensureFileDeletable(file) && tmpFile.renameTo(file)) {
-                LogUtil.i("Download", "文件重命名成功: ${tmpFile.name} -> ${file.name}")
-            } else {
-                // renameTo 失败或目标不可删除，回退为复制 + 删除
-                LogUtil.w("Download", "renameTo 失败，回退为复制: ${tmpFile.name} -> ${file.name}")
-                tmpFile.inputStream().buffered().use { input ->
-                    file.outputStream().buffered().use { output ->
-                        val buffer = ByteArray(8192)
-                        var bytesRead: Int
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                        }
-                    }
-                }
-                tmpFile.delete()
-            }
+            atomicMoveOrCopy(tmpFile, file)
 
             publishToDownloads(file, file.name)
             _downloadState.value = _downloadState.value.copy(
@@ -330,12 +352,7 @@ object InAppDownloadManager {
         }
 
         cleanupPartFiles(file)
-        val defaultTmpFile = File(file.parentFile, "${file.name}.tmp")
-        val tmpFile = if (ensureFileDeletable(defaultTmpFile)) {
-            defaultTmpFile
-        } else {
-            File(file.parentFile, "${file.name}.${System.currentTimeMillis()}.tmp")
-        }
+        val tmpFile = tmpFileFor(file)
         val partFiles = (0 until MULTI_THREAD_COUNT).map { i ->
             File(file.parentFile, "${file.name}.part$i")
         }
@@ -360,7 +377,11 @@ object InAppDownloadManager {
                             if (!response.isSuccessful) {
                                 throw IOException("分片下载失败 HTTP ${response.code}")
                             }
-                            val source = response.body!!.source()
+                            val body = response.body ?: run {
+                                LogUtil.e("Download", "分片 $i 响应体为空")
+                                throw IOException("分片 $i 响应体为空")
+                            }
+                            val source = body.source()
                             partFile.outputStream().buffered().use { output ->
                                 val buffer = ByteArray(8192)
                                 var bytesRead: Int
@@ -371,19 +392,11 @@ object InAppDownloadManager {
                                     output.write(buffer, 0, bytesRead)
                                     chunkBytes.addAndGet(i, bytesRead.toLong())
 
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastReportTime >= 200) {
-                                        lastReportTime = now
-                                        var total = 0L
-                                        for (j in 0 until MULTI_THREAD_COUNT) {
-                                            total += chunkBytes.get(j)
-                                        }
-                                        val speed = updateSpeed(now, total)
-                                        _downloadState.value = _downloadState.value.copy(
-                                            downloadedBytes = total,
-                                            speedBytesPerSec = speed
-                                        )
+                                    var total = 0L
+                                    for (j in 0 until MULTI_THREAD_COUNT) {
+                                        total += chunkBytes.get(j)
                                     }
+                                    lastReportTime = reportProgress(total, lastReportTime)
                                 }
                             }
                         } finally {
@@ -412,21 +425,7 @@ object InAppDownloadManager {
             }
 
             // 原子化：临时文件重命名为目标文件
-            if (ensureFileDeletable(file) && tmpFile.renameTo(file)) {
-                LogUtil.i("Download", "文件重命名成功: ${tmpFile.name} -> ${file.name}")
-            } else {
-                LogUtil.w("Download", "renameTo 失败，回退为复制: ${tmpFile.name} -> ${file.name}")
-                tmpFile.inputStream().buffered().use { input ->
-                    file.outputStream().buffered().use { output ->
-                        val buffer = ByteArray(8192)
-                        var bytesRead: Int
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                        }
-                    }
-                }
-                tmpFile.delete()
-            }
+            atomicMoveOrCopy(tmpFile, file)
 
             publishToDownloads(file, file.name)
             _downloadState.value = _downloadState.value.copy(

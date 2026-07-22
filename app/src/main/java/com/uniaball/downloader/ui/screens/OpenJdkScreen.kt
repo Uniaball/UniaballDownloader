@@ -1,36 +1,27 @@
 package com.uniaball.downloader.ui.screens
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -48,23 +38,22 @@ import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.WorkflowRun
 import com.uniaball.downloader.data.model.WorkflowRunPage
 import com.uniaball.downloader.data.repository.UniaballRepository
-import com.uniaball.downloader.ui.components.DownloadProgressDialog
-import com.uniaball.downloader.ui.entranceAnimation
+import com.uniaball.downloader.ui.components.BaseDownloadViewModel
+import com.uniaball.downloader.ui.components.CollectSnackbar
+import com.uniaball.downloader.ui.components.DownloadScreenScaffold
+import com.uniaball.downloader.ui.components.StateEmptyView
+import com.uniaball.downloader.ui.components.StateErrorView
+import com.uniaball.downloader.ui.components.StateLoadingView
+import com.uniaball.downloader.ui.components.StatusChip
 import com.uniaball.downloader.ui.screenTransitionSpec
-import com.uniaball.downloader.util.DownloadStatus
 import com.uniaball.downloader.util.DownloadUtil
-import com.uniaball.downloader.util.InAppDownloadManager
 import com.uniaball.downloader.util.formatSize
 import com.uniaball.downloader.util.formatTime
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -85,13 +74,10 @@ data class OpenJdkBuildItem(
 
 // ===== ViewModel =====
 
-class OpenJdkViewModel : ViewModel() {
+class OpenJdkViewModel : BaseDownloadViewModel() {
 
     private val _uiState = MutableStateFlow<OpenJdkUiState>(OpenJdkUiState.Idle)
     val uiState: StateFlow<OpenJdkUiState> = _uiState.asStateFlow()
-
-    private val _snackbar = MutableSharedFlow<String>()
-    val snackbar: SharedFlow<String> = _snackbar.asSharedFlow()
 
     private val _selectedVersion = MutableStateFlow<Int?>(null)
     val selectedVersion: StateFlow<Int?> = _selectedVersion.asStateFlow()
@@ -253,21 +239,13 @@ class OpenJdkViewModel : ViewModel() {
                 } else {
                     _uiState.value = OpenJdkUiState.Success(items)
                 }
-            } catch (e: CancellationException) {
-                // 协程被取消时正确向上传播，避免被当作业务异常吞掉导致状态泄漏
-                throw e
-            } catch (e: com.uniaball.downloader.data.repository.RateLimitedException) {
-                if (_uiState.value !is OpenJdkUiState.Success) {
-                    _uiState.value = OpenJdkUiState.Error(e.message ?: "GitHub API 速率限制")
-                } else {
-                    _snackbar.emit(e.message ?: "GitHub API 速率限制")
-                }
             } catch (e: Exception) {
-                if (_uiState.value !is OpenJdkUiState.Success) {
-                    _uiState.value = OpenJdkUiState.Error(e.message ?: "未知错误")
-                } else {
-                    _snackbar.emit(e.message ?: "刷新失败")
-                }
+                handleLoadException(
+                    e,
+                    hasContent = _uiState.value is OpenJdkUiState.Success,
+                    setError = { msg -> _uiState.value = OpenJdkUiState.Error(msg) },
+                    genericErrorMessage = "未知错误"
+                )
             } finally {
                 _isFetching.value = false
             }
@@ -290,18 +268,12 @@ fun OpenJdkScreen(
     val isFetching by viewModel.isFetching.collectAsStateWithLifecycle()
     var menuExpanded by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
-    val downloadState by InAppDownloadManager.downloadState.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.snackbar.collect { msg ->
-            snackbarHostState.showSnackbar(msg)
-        }
-    }
+    viewModel.CollectSnackbar(snackbarHostState)
 
-    Scaffold(
+    DownloadScreenScaffold(
         modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        snackbarHostState = snackbarHostState
     ) { padding ->
         Column(
             modifier = Modifier
@@ -363,83 +335,28 @@ fun OpenJdkScreen(
                 label = "openjdk-state"
             ) { state ->
                 when (state) {
-                    OpenJdkUiState.Idle -> IdleContent()
-                    OpenJdkUiState.Loading -> LoadingContent()
+                    OpenJdkUiState.Idle -> Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "请选择版本并获取构建",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OpenJdkUiState.Loading -> StateLoadingView()
                     is OpenJdkUiState.Success -> BuildsList(
                         items = state.items,
                         onDownload = { url, name -> DownloadUtil.startInAppDownload(url, name) }
                     )
-                    is OpenJdkUiState.Error -> ErrorContent(
+                    is OpenJdkUiState.Error -> StateErrorView(
                         message = state.message,
                         onRetry = { viewModel.fetchBuilds() }
                     )
-                    OpenJdkUiState.Empty -> EmptyContent()
+                    OpenJdkUiState.Empty -> StateEmptyView("未发现可下载的构建文件")
                 }
             }
-        }
-    }
-
-    if (downloadState.status != DownloadStatus.IDLE) {
-        DownloadProgressDialog(
-            state = downloadState,
-            onDismiss = { InAppDownloadManager.resetState() }
-        )
-    }
-}
-
-@Composable
-private fun IdleContent() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "请选择版本并获取构建",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun LoadingContent() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        CircularProgressIndicator()
-    }
-}
-
-@Composable
-private fun EmptyContent() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "未发现可下载的构建文件",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun ErrorContent(message: String, onRetry: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "加载失败：$message",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.error
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        FilledTonalButton(onClick = onRetry) {
-            Text("重试")
         }
     }
 }
@@ -454,8 +371,8 @@ private fun BuildsList(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        itemsIndexed(items, key = { _, it -> it.artifact.id }, contentType = { _, _ -> "openjdk_build" }) { index, item ->
-            BuildCard(item = item, onDownload = onDownload, modifier = Modifier.animateItem().entranceAnimation(delayMillis = (index % 10) * 50))
+        itemsIndexed(items, key = { _, it -> it.artifact.id }, contentType = { _, _ -> "openjdk_build" }) { _, item ->
+            BuildCard(item = item, onDownload = onDownload, modifier = Modifier.animateItem())
         }
     }
 }
@@ -500,7 +417,7 @@ private fun BuildCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                ConclusionChip(conclusion = run.conclusion)
+                StatusChip(conclusion = run.conclusion)
                 Text(
                     text = formatSize(artifact.sizeInBytes),
                     style = MaterialTheme.typography.bodyMedium,
@@ -522,28 +439,4 @@ private fun BuildCard(
             }
         }
     }
-}
-
-@Composable
-private fun ConclusionChip(conclusion: String?) {
-    val (text, color) = when (conclusion) {
-        "success" -> "成功" to MaterialTheme.colorScheme.primary
-        "failure" -> "失败" to MaterialTheme.colorScheme.error
-        "cancelled" -> "已取消" to MaterialTheme.colorScheme.outline
-        null -> "进行中" to MaterialTheme.colorScheme.tertiary
-        else -> conclusion to MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelMedium,
-        color = color,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-            .background(
-                color = color.copy(alpha = 0.12f),
-                shape = MaterialTheme.shapes.small
-            )
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-    )
 }

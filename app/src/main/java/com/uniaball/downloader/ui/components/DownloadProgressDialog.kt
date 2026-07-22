@@ -40,12 +40,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -118,29 +120,25 @@ fun DownloadProgressDialog(
 private fun DownloadingContent(state: DownloadState) {
 
     val infiniteTransition = rememberInfiniteTransition(label = "downloadPulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.05f,
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(800),
+            animation = tween(700),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulse"
     )
-    val arrowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "arrowAlpha"
-    )
+    val pulseScale = 1f + 0.05f * pulse
+    val arrowAlpha = 0.4f + 0.6f * pulse
 
     Box(
         modifier = Modifier
             .size(64.dp)
-            .scale(pulseScale)
+            .graphicsLayer {
+                scaleX = pulseScale
+                scaleY = pulseScale
+            }
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.primaryContainer),
         contentAlignment = Alignment.Center
@@ -150,7 +148,7 @@ private fun DownloadingContent(state: DownloadState) {
             contentDescription = "下载中",
             modifier = Modifier
                 .size(32.dp)
-                .alpha(arrowAlpha),
+                .graphicsLayer { alpha = arrowAlpha },
             tint = MaterialTheme.colorScheme.onPrimaryContainer
         )
     }
@@ -240,20 +238,14 @@ private fun DownloadingContent(state: DownloadState) {
 private fun CompletedContent(state: DownloadState, onDismiss: () -> Unit) {
     val context = LocalContext.current
 
-    Box(
-        modifier = Modifier
-            .size(64.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = Icons.Filled.CheckCircle,
-            contentDescription = "下载完成",
-            modifier = Modifier.size(40.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-    }
+    StatusIconBox(
+        size = 64.dp,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+        icon = Icons.Filled.CheckCircle,
+        contentDescription = "下载完成",
+        tint = MaterialTheme.colorScheme.primary,
+        iconSize = 40.dp
+    )
 
     Text(
         text = "下载完成",
@@ -287,20 +279,14 @@ private fun CompletedContent(state: DownloadState, onDismiss: () -> Unit) {
 
 @Composable
 private fun FailedContent(state: DownloadState, onDismiss: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(64.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.errorContainer),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Error,
-            contentDescription = "下载失败",
-            modifier = Modifier.size(32.dp),
-            tint = MaterialTheme.colorScheme.error
-        )
-    }
+    StatusIconBox(
+        size = 64.dp,
+        color = MaterialTheme.colorScheme.errorContainer,
+        icon = Icons.Filled.Error,
+        contentDescription = "下载失败",
+        tint = MaterialTheme.colorScheme.error,
+        iconSize = 32.dp
+    )
 
     Text(
         text = "下载失败",
@@ -336,20 +322,14 @@ private fun FailedContent(state: DownloadState, onDismiss: () -> Unit) {
 
 @Composable
 private fun CancelledContent(onDismiss: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(64.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Cancel,
-            contentDescription = "已取消",
-            modifier = Modifier.size(32.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
+    StatusIconBox(
+        size = 64.dp,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        icon = Icons.Filled.Cancel,
+        contentDescription = "已取消",
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        iconSize = 32.dp
+    )
 
     Text(
         text = "下载已取消",
@@ -362,5 +342,30 @@ private fun CancelledContent(onDismiss: () -> Unit) {
         modifier = Modifier.fillMaxWidth()
     ) {
         Text("确定")
+    }
+}
+
+@Composable
+private fun StatusIconBox(
+    size: Dp,
+    color: Color,
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+    iconSize: Dp
+) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(color),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(iconSize)
+        )
     }
 }

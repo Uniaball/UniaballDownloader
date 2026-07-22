@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
@@ -35,9 +36,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,13 +50,28 @@ import com.uniaball.downloader.data.repository.UniaballRepository
 import com.uniaball.downloader.util.LogUtil
 import com.uniaball.downloader.ui.entranceAnimation
 import com.uniaball.downloader.util.formatSize
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val mirrorEnabled by UniaballRepository.isMirrorEnabled.collectAsStateWithLifecycle()
     val apkOnly by UniaballRepository.isMobileGlApkOnly.collectAsStateWithLifecycle()
     val multiThread by UniaballRepository.isMultiThreadDownload.collectAsStateWithLifecycle()
+
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
+    var showConfirmDialog by remember { mutableStateOf(false) }
+    var cacheSize by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            cacheSize = UniaballRepository.getCacheSize()
+        }
+    }
 
     Column(
         modifier = modifier
@@ -68,174 +86,59 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             fontWeight = FontWeight.Bold
         )
 
-        Card(
-            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 0)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.CloudSync,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = "使用 gh-proxy.com 镜像下载",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "关闭后直连 GitHub，可能需要科学上网",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = mirrorEnabled,
-                    onCheckedChange = { UniaballRepository.setMirrorEnabled(it) }
-                )
-            }
-        }
+        SettingsToggleCard(
+            icon = Icons.Filled.CloudSync,
+            title = "使用 gh-proxy.com 镜像下载",
+            subtitle = "关闭后直连 GitHub，可能需要科学上网",
+            checked = mirrorEnabled,
+            onCheckedChange = { UniaballRepository.setMirrorEnabled(it) },
+            delayMillis = 0,
+            visible = visible
+        )
 
-        Card(
-            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 50)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.FilterAlt,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = "仅显示 APK 产物",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "过滤非 APK 产物及名称含 trace 的 APK",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = apkOnly,
-                    onCheckedChange = { UniaballRepository.setMobileGlApkOnly(it) }
-                )
-            }
-        }
+        SettingsToggleCard(
+            icon = Icons.Filled.FilterAlt,
+            title = "仅显示 APK 产物",
+            subtitle = "过滤非 APK 产物及名称含 trace 的 APK",
+            checked = apkOnly,
+            onCheckedChange = { UniaballRepository.setMobileGlApkOnly(it) },
+            delayMillis = 50,
+            visible = visible
+        )
 
-        Card(
-            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 100)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Speed,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = "多线程下载（实验性）",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "通过 HTTP Range 并发分片加速下载，部分服务器可能不支持",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = multiThread,
-                    onCheckedChange = { UniaballRepository.setMultiThreadDownload(it) }
-                )
-            }
-        }
+        SettingsToggleCard(
+            icon = Icons.Filled.Speed,
+            title = "多线程下载（实验性）",
+            subtitle = "通过 HTTP Range 并发分片加速下载，部分服务器可能不支持",
+            checked = multiThread,
+            onCheckedChange = { UniaballRepository.setMultiThreadDownload(it) },
+            delayMillis = 100,
+            visible = visible
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
         // ===== 缓存管理 =====
-        var showConfirmDialog by remember { mutableStateOf(false) }
-        var cacheSize by remember { mutableStateOf(0L) }
-        LaunchedEffect(Unit) {
-            cacheSize = UniaballRepository.getCacheSize()
-        }
-
         Text(
             text = "缓存管理",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold
         )
 
-        Card(
-            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 150)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.DeleteSweep,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = "清除 API 缓存",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = if (cacheSize > 0) "当前缓存大小：${formatSize(cacheSize)}" else "当前无缓存数据",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Button(
-                    onClick = { showConfirmDialog = true },
-                    enabled = cacheSize > 0,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                ) {
-                    Text("清除")
-                }
-            }
-        }
+        SettingsActionCard(
+            icon = Icons.Filled.DeleteSweep,
+            title = "清除 API 缓存",
+            subtitle = if (cacheSize > 0) "当前缓存大小：${formatSize(cacheSize)}" else "当前无缓存数据",
+            buttonText = "清除",
+            onClick = { showConfirmDialog = true },
+            delayMillis = 150,
+            visible = visible,
+            enabled = cacheSize > 0,
+            buttonColors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer
+            )
+        )
 
         if (showConfirmDialog) {
             AlertDialog(
@@ -271,49 +174,23 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             fontWeight = FontWeight.Bold
         )
 
-        Card(
-            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 200)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Share,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = "导出运行日志",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "导出应用 logcat 日志用于排查问题",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Button(
-                    onClick = {
-                        runCatching {
-                            LogUtil.shareLogs(context)
-                        }.onFailure {
-                            Toast.makeText(context, "导出日志失败: ${it.message}", Toast.LENGTH_SHORT).show()
-                        }
+        SettingsActionCard(
+            icon = Icons.Filled.Share,
+            title = "导出运行日志",
+            subtitle = "导出应用 logcat 日志用于排查问题",
+            buttonText = "导出",
+            onClick = {
+                scope.launch {
+                    runCatching {
+                        LogUtil.shareLogs(context)
+                    }.onFailure {
+                        Toast.makeText(context, "导出日志失败: ${it.message}", Toast.LENGTH_SHORT).show()
                     }
-                ) {
-                    Text("导出")
                 }
-            }
-        }
+            },
+            delayMillis = 200,
+            visible = visible
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -333,7 +210,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     context.startActivity(intent)
                 }
             },
-            modifier = Modifier.fillMaxWidth().entranceAnimation(delayMillis = 250)
+            modifier = Modifier.fillMaxWidth().entranceAnimation(visible = visible, delayMillis = 250)
         ) {
             Row(
                 modifier = Modifier
@@ -382,5 +259,106 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+@Composable
+private fun SettingsToggleCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    delayMillis: Int,
+    visible: Boolean
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().entranceAnimation(visible = visible, delayMillis = delayMillis)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsActionCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    buttonText: String,
+    onClick: () -> Unit,
+    delayMillis: Int,
+    visible: Boolean,
+    enabled: Boolean = true,
+    buttonColors: ButtonColors = ButtonDefaults.buttonColors()
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().entranceAnimation(visible = visible, delayMillis = delayMillis)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Button(
+                onClick = onClick,
+                enabled = enabled,
+                colors = buttonColors
+            ) {
+                Text(buttonText)
+            }
+        }
     }
 }

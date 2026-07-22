@@ -8,6 +8,7 @@ import com.uniaball.downloader.data.model.ArtifactPage
 import com.uniaball.downloader.data.model.GitHubRelease
 import com.uniaball.downloader.data.model.WorkflowRunPage
 import com.uniaball.downloader.util.LogUtil
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -78,23 +79,23 @@ object UniaballRepository {
         var total = 0L
         for ((key, value) in p.all) {
             if (key.startsWith("cache_") && value is String) {
-                total += value.toByteArray(Charsets.UTF_8).size
+                total += value.length.toLong()
             }
         }
         return total
     }
 
     // 内存缓存
-    private val releasesCache = mutableMapOf<String, List<GitHubRelease>>()
+    private val releasesCache = ConcurrentHashMap<String, List<GitHubRelease>>()
     @Volatile
     private var mobileGlRunsCacheValue: WorkflowRunPage? = null
     @Volatile
     private var allRunsCache: WorkflowRunPage? = null
-    private val openJdkRunsCache = mutableMapOf<Int, WorkflowRunPage>()
-    private val artifactCache = mutableMapOf<String, ArtifactPage>()
+    private val openJdkRunsCache = ConcurrentHashMap<Int, WorkflowRunPage>()
+    private val artifactCache = ConcurrentHashMap<String, ArtifactPage>()
 
     // 节流时间戳
-    private val lastFetchTimestamps = mutableMapOf<String, Long>()
+    private val lastFetchTimestamps = ConcurrentHashMap<String, Long>()
 
     // SharedPreferences 注入
     private var appContext: Context? = null
@@ -334,18 +335,46 @@ object UniaballRepository {
         artifactCache["${owner}_${repo}_$runId"]
 
     // ===== 磁盘缓存读取（启动时调用） =====
-    fun loadDesktopGluesReleasesFromDisk(): List<GitHubRelease>? =
-        loadFromDisk(KEY_DESKTOPGLUES_RELEASES) ?: releasesCache[KEY_DESKTOPGLUES_RELEASES]
-    fun loadMobileGlRunsFromDisk(): WorkflowRunPage? {
-        return loadFromDisk(KEY_MOBILEGL_RUNS) ?: mobileGlRunsCacheValue
+    fun loadDesktopGluesReleasesFromDisk(): List<GitHubRelease>? {
+        val fromDisk: List<GitHubRelease>? = loadFromDisk(KEY_DESKTOPGLUES_RELEASES)
+        if (fromDisk != null) {
+            releasesCache[KEY_DESKTOPGLUES_RELEASES] = fromDisk
+            return fromDisk
+        }
+        return releasesCache[KEY_DESKTOPGLUES_RELEASES]
     }
-    fun loadAllRunsFromDisk(): WorkflowRunPage? =
-        loadFromDisk(KEY_OPENJDK_ALL_RUNS) ?: allRunsCache
+    fun loadMobileGlRunsFromDisk(): WorkflowRunPage? {
+        val fromDisk: WorkflowRunPage? = loadFromDisk(KEY_MOBILEGL_RUNS)
+        if (fromDisk != null) {
+            mobileGlRunsCacheValue = fromDisk
+            return fromDisk
+        }
+        return mobileGlRunsCacheValue
+    }
+    fun loadAllRunsFromDisk(): WorkflowRunPage? {
+        val fromDisk: WorkflowRunPage? = loadFromDisk(KEY_OPENJDK_ALL_RUNS)
+        if (fromDisk != null) {
+            allRunsCache = fromDisk
+            return fromDisk
+        }
+        return allRunsCache
+    }
     fun loadOpenJdkRunsFromDisk(jdkVersion: Int): WorkflowRunPage? {
-        return loadFromDisk("$KEY_OPENJDK_RUNS_PREFIX$jdkVersion") ?: openJdkRunsCache[jdkVersion]
+        val fromDisk: WorkflowRunPage? = loadFromDisk("$KEY_OPENJDK_RUNS_PREFIX$jdkVersion")
+        if (fromDisk != null) {
+            openJdkRunsCache[jdkVersion] = fromDisk
+            return fromDisk
+        }
+        return openJdkRunsCache[jdkVersion]
     }
     fun loadArtifactsFromDisk(owner: String, repo: String, runId: Long): ArtifactPage? {
-        return loadFromDisk("$KEY_ARTIFACTS_PREFIX${owner}_${repo}_$runId") ?: artifactCache["${owner}_${repo}_$runId"]
+        val cacheKey = "${owner}_${repo}_$runId"
+        val fromDisk: ArtifactPage? = loadFromDisk("$KEY_ARTIFACTS_PREFIX$cacheKey")
+        if (fromDisk != null) {
+            artifactCache[cacheKey] = fromDisk
+            return fromDisk
+        }
+        return artifactCache[cacheKey]
     }
 
     // ===== 内部 SharedPreferences 读写 =====

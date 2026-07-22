@@ -26,6 +26,19 @@ import com.uniaball.downloader.ui.screens.MobileGlScreen
 import com.uniaball.downloader.ui.screens.OpenJdkScreen
 import com.uniaball.downloader.ui.screens.SettingsScreen
 
+/**
+ * 稳定的屏幕槽位类型，用于 [AnimatedContent] 的 targetState。
+ *
+ * 直接使用 `SubScreen? : Destination` 联合类型（实际为 `Any`）会导致内容 lambda 每次都重组，
+ * 因为该类型不稳定。包装为 sealed interface 后，由于 [Destination]（enum）与 [SubScreen]
+ * （sealed class，全 data object 实现）均为稳定类型，[Main] 与 [Sub] 也是稳定类型，
+ * 从而使 [AnimatedContent] 仅在 target 真正变化时重组。
+ */
+sealed interface ScreenSlot {
+    data class Main(val destination: Destination) : ScreenSlot
+    data class Sub(val screen: SubScreen) : ScreenSlot
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
@@ -74,21 +87,30 @@ fun MainScreen() {
             }
         }
     ) { padding ->
+        // 缓存派生的 ScreenSlot，避免每次重组都 new 新实例（否则仍不稳定）。
+        // 依赖 subScreen 与 current，仅当二者变化时才重新计算。
+        val screenSlot = remember(subScreen, current) {
+            if (subScreen != null) ScreenSlot.Sub(subScreen) else ScreenSlot.Main(current)
+        }
         AnimatedContent(
-            targetState = subScreen ?: current,
+            targetState = screenSlot,
             modifier = Modifier.fillMaxSize().padding(padding),
             transitionSpec = { screenTransitionSpec() },
             label = "screen-transition"
         ) { target ->
             when (target) {
-                is SubScreen.DesktopGlues -> DesktopGluesScreen(modifier = Modifier.fillMaxSize())
-                is SubScreen.OpenJdk -> OpenJdkScreen(modifier = Modifier.fillMaxSize())
-                is SubScreen.MobileGl -> MobileGlScreen(modifier = Modifier.fillMaxSize())
-                Destination.Home -> HomeScreen(
-                    modifier = Modifier.fillMaxSize(),
-                    onNavigate = { subScreen = it }
-                )
-                Destination.Settings -> SettingsScreen(modifier = Modifier.fillMaxSize())
+                is ScreenSlot.Sub -> when (target.screen) {
+                    is SubScreen.DesktopGlues -> DesktopGluesScreen(modifier = Modifier.fillMaxSize())
+                    is SubScreen.OpenJdk -> OpenJdkScreen(modifier = Modifier.fillMaxSize())
+                    is SubScreen.MobileGl -> MobileGlScreen(modifier = Modifier.fillMaxSize())
+                }
+                is ScreenSlot.Main -> when (target.destination) {
+                    Destination.Home -> HomeScreen(
+                        modifier = Modifier.fillMaxSize(),
+                        onNavigate = { subScreen = it }
+                    )
+                    Destination.Settings -> SettingsScreen(modifier = Modifier.fillMaxSize())
+                }
             }
         }
     }
